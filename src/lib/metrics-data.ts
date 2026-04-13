@@ -11,42 +11,63 @@ export interface ClientMetrics {
   dailyMetrics: DailyMetric[];
 }
 
-function generateDays(year: number, month: number, count: number, leadsRange: [number, number], accountsRange: [number, number]): DailyMetric[] {
-  const days: DailyMetric[] = [];
-  for (let d = 1; d <= count; d++) {
-    const mm = String(month).padStart(2, "0");
-    const dd = String(d).padStart(2, "0");
-    days.push({
-      date: `${year}-${mm}-${dd}`,
-      leadsUploaded: Math.floor(Math.random() * (leadsRange[1] - leadsRange[0] + 1)) + leadsRange[0],
-      accountsMined: Math.floor(Math.random() * (accountsRange[1] - accountsRange[0] + 1)) + accountsRange[0],
-    });
-  }
-  return days;
-}
-
-const seed = (id: string): [number, number] => {
-  const n = parseInt(id.replace("p", ""), 10);
-  return [n * 2 + 3, n + 1];
+export const clientMetrics: Record<string, ClientMetrics[]> = {
+  p1: [
+    { clientId: "p1", month: "April", year: 2026, dailyMetrics: [] },
+  ],
+  p2: [
+    { clientId: "p2", month: "April", year: 2026, dailyMetrics: [
+      { date: "2026-04-01", leadsUploaded: 205, accountsMined: 0 },
+      { date: "2026-04-02", leadsUploaded: 201, accountsMined: 0 },
+      { date: "2026-04-03", leadsUploaded: 208, accountsMined: 0 },
+      { date: "2026-04-06", leadsUploaded: 190, accountsMined: 0 },
+    ]},
+  ],
+  p3: [
+    { clientId: "p3", month: "April", year: 2026, dailyMetrics: [
+      { date: "2026-04-02", leadsUploaded: 130, accountsMined: 0 },
+      { date: "2026-04-03", leadsUploaded: 110, accountsMined: 0 },
+    ]},
+  ],
+  p4: [
+    { clientId: "p4", month: "April", year: 2026, dailyMetrics: [
+      { date: "2026-04-03", leadsUploaded: 0, accountsMined: 280 },
+    ]},
+  ],
+  p5: [
+    { clientId: "p5", month: "April", year: 2026, dailyMetrics: [
+      { date: "2026-04-02", leadsUploaded: 195, accountsMined: 0 },
+      { date: "2026-04-03", leadsUploaded: 236, accountsMined: 0 },
+    ]},
+  ],
+  p6: [
+    { clientId: "p6", month: "April", year: 2026, dailyMetrics: [
+      { date: "2026-04-01", leadsUploaded: 448, accountsMined: 0 },
+      { date: "2026-04-03", leadsUploaded: 307, accountsMined: 0 },
+      { date: "2026-04-06", leadsUploaded: 460, accountsMined: 0 },
+    ]},
+  ],
+  p7: [
+    { clientId: "p7", month: "April", year: 2026, dailyMetrics: [
+      { date: "2026-04-02", leadsUploaded: 154, accountsMined: 0 },
+      { date: "2026-04-03", leadsUploaded: 372, accountsMined: 0 },
+    ]},
+  ],
+  p8: [
+    { clientId: "p8", month: "April", year: 2026, dailyMetrics: [
+      { date: "2026-04-02", leadsUploaded: 328, accountsMined: 0 },
+    ]},
+  ],
+  p9: [
+    { clientId: "p9", month: "April", year: 2026, dailyMetrics: [] },
+  ],
+  p10: [
+    { clientId: "p10", month: "April", year: 2026, dailyMetrics: [] },
+  ],
+  p11: [
+    { clientId: "p11", month: "April", year: 2026, dailyMetrics: [] },
+  ],
+  p12: [
+    { clientId: "p12", month: "April", year: 2026, dailyMetrics: [] },
+  ],
 };
-
-export const clientMetrics: Record<string, ClientMetrics[]> = {};
-
-const clientIds = Array.from({ length: 12 }, (_, i) => `p${i + 1}`);
-for (const cid of clientIds) {
-  const [lBase, aBase] = seed(cid);
-  clientMetrics[cid] = [
-    {
-      clientId: cid,
-      month: "April",
-      year: 2026,
-      dailyMetrics: generateDays(2026, 4, 9, [lBase, lBase + 12], [aBase, aBase + 8]),
-    },
-    {
-      clientId: cid,
-      month: "March",
-      year: 2026,
-      dailyMetrics: generateDays(2026, 3, 31, [lBase, lBase + 12], [aBase, aBase + 8]),
-    },
-  ];
-}

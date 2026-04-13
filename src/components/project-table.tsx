@@ -114,6 +114,40 @@ const columns = [
   { key: "health", label: "Health Status", short: "Health", breakpoint: 130, defaultWidth: 150, align: "center" as const },
 ];
 
+function EditableTargetCell({ value, editable, onSave }: { value: number; editable: boolean; onSave: (v: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+
+  if (!editable || !editing) {
+    return (
+      <td
+        className={`px-6 py-4 text-right tabular-nums font-medium text-slate-900 overflow-hidden truncate ${editable ? "cursor-pointer hover:bg-[#6800FF]/5 transition-colors" : ""}`}
+        onDoubleClick={() => { if (editable) { setDraft(String(value)); setEditing(true); } }}
+        title={editable ? "Double-click to edit" : undefined}
+      >
+        {value}
+      </td>
+    );
+  }
+
+  return (
+    <td className="px-2 py-2 overflow-hidden">
+      <input
+        type="number"
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => { onSave(Number(draft) || 0); setEditing(false); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { onSave(Number(draft) || 0); setEditing(false); }
+          if (e.key === "Escape") setEditing(false);
+        }}
+        className="w-full px-3 py-2 text-right text-sm font-medium border-2 border-[#6800FF] rounded-lg bg-white focus:outline-none tabular-nums"
+      />
+    </td>
+  );
+}
+
 export default function ProjectTable() {
   const { pods, podMap } = usePods();
   const { projects, addProject, updateProject } = useData();
@@ -180,6 +214,8 @@ export default function ProjectTable() {
       weeklyTargetExternal: Number(newClient.weeklyTargetExternal) || 0,
       monthlyTargetInternal: Number(newClient.monthlyTargetInternal) || 0,
       targetsAchieved: 0,
+      meetingCompleted: 0,
+      meetingBooked: 0,
     };
     addProject(project);
     addNotification(`Admin assigned new client "${project.clientName}" to your pod`, "pod", project.assignedPod);
@@ -346,17 +382,9 @@ export default function ProjectTable() {
                         />
                       </td>
 
-                      <td className="px-6 py-4 text-right tabular-nums font-medium text-slate-900 overflow-hidden truncate">
-                        {project.monthlyTargetExternal}
-                      </td>
-
-                      <td className="px-6 py-4 text-right tabular-nums font-medium text-slate-900 overflow-hidden truncate">
-                        {project.weeklyTargetExternal}
-                      </td>
-
-                      <td className="px-6 py-4 text-right tabular-nums font-medium text-slate-900 overflow-hidden truncate">
-                        {project.monthlyTargetInternal}
-                      </td>
+                      <EditableTargetCell value={project.monthlyTargetExternal} editable={isAdmin} onSave={(v) => updateProject(project.id, { monthlyTargetExternal: v })} />
+                      <EditableTargetCell value={project.weeklyTargetExternal} editable={isAdmin} onSave={(v) => updateProject(project.id, { weeklyTargetExternal: v })} />
+                      <EditableTargetCell value={project.monthlyTargetInternal} editable={isAdmin} onSave={(v) => updateProject(project.id, { monthlyTargetInternal: v })} />
 
                       <td className="px-6 py-4 overflow-hidden">
                         <div className="flex items-center gap-2 min-w-0">
@@ -375,10 +403,16 @@ export default function ProjectTable() {
                       </td>
 
                       <td className="px-6 py-4 text-right overflow-hidden">
-                        <div className="truncate tabular-nums">
+                        <div className="tabular-nums">
                           <span className="text-base font-semibold text-slate-900">{project.targetsAchieved}</span>
                           <span className="text-slate-400 text-sm"> / {project.monthlyTargetInternal}</span>
                         </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          <span className="text-emerald-500 font-medium">{project.meetingCompleted || 0}</span>
+                          {" Completed + "}
+                          <span className="text-amber-500 font-medium">{project.meetingBooked || 0}</span>
+                          {" Booked"}
+                        </p>
                       </td>
 
                       <td className="px-6 py-4 overflow-hidden">

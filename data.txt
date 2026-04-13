@@ -1,75 +1,26 @@
-Month	Client Name	        Geo	        AM Name	        Meeting Date	        Meeting Time	        Company Name	        Contact Name	        Contact Title	                Contact Email	                Contact Number
-Jan	     Clevertap	        India	    Sandeep	        8th Jan 26	                15:00	            Eagle Footwear	        Karan Bhagat	            Director	            krbhagat11694@gmail.com	                9879696972
-Jan	     Clevertap	        India	    Manshi	        6/1/2025	                11:00	             Project Shades	          Raj Azad	                Founder	                  raj@projectshades.com	                9075007864
-Jan	     Clevertap	        India	    Manshi	        7/1/2025	                15:00	                Aisha Rao	         Mourya Pulugu	            Growth Marketing Manager	mourya@aisharao.com	                9390746799
-Jan	     Clevertap	        India	    Manshi	        7/1/2025	                12:00	            Banter Kitchen	          Vikas Prakash	            Founder’s Office	        hello@banterkitchen.com	            9849947260
-Jan	     Clevertap	        India	    Manshi	        6/1/2025	                14:00	            VYRAL24	                   Vishal Dhankhar	        Co-Founder	                vishal@vyral24.com	                9306279640
-Jan	     Clevertap	        India	    Manshi	        6/1/2025	                15:00	            HealthKart	            Nishank Agarwal	            Product Lead	      nishank.agarwal@brightlifecare.com	    9958722366
-Jan	     Clevertap	        India	    Manshi	        8/1/2026	                14:00	            Rasa Silver Jewels	        Manan Bohra	            Founder	                    mb@rasasilver.com	                7022461367
-Jan	     Clevertap	        India	    Sandeep	        9/1/2025	                14:00	            Wayveda	                    Sunil Munjal    Director of Digital Marketings      unilmunjal@digitalchaabi.com	    70153 50423
-Jan	     Clevertap	        India	    Manshi	        9/1/2025	                11:00	            Mensa Brands	            Bhooshan Patil	        Brand Head	              bhooshan.patil@mensabrands.com	
-Jan	     Clevertap	        India	Manshi	12/1/2026	14:00	Chupps	Ravi Adhikari	Marketing & Brand Lead	ravi@chupps.com	98209 96926
-Jan	     Clevertap	        India	Manshi	13/1/2026	11:00	Rachna Sagar	Ashish Gupta	Business Head	ashish.gupta@rachnasagar.in	7042459879
-Jan	     Clevertap	        India	Manshi	14/1/2026	15:00	Duke	Gagan Jain	Brand Head	gaganjain@duke      india.com	7443003848
-Jan	     Clevertap	        India	Swetha	8/1/2026	16:00	Cumin Co	Udit Lekhi	Co-Founder	udit@cuminco.com	9971518700
-Jan	     Clevertap	        India	Sandeep	13/1/2025	19:00	FitFeast	Aditya Poddar	Founder	aditya@fitfeast.in	98712 85350
-Jan	     Clevertap	        India	Manshi	16/1/2026	13:30	Digitek	Saurabh Singh	Amazon PPC Manager	saurabh@digitek.net.in	9654994469
-Jan	     Clevertap	        India	Manshi	19/1/2026	11:00	ARAKU Coffee	Kunal Ross	Deputy General Manager Operations:	kunal.ross@arakuoriginals.com	9820114360
-Jan	     Clevertap	        India	Manshi	21/1/2026	11:30	TrueData™ Financial Information	Kapil Marwaha	Founder	kapil@truedata.in	9311279054
-Jan	     Clevertap	        India	Sandeep	21/1/2026	12:00	Jaipur watch	Amit 	Sr. manager marketing	marketing@jaipurwatches.com	7300074117
-Jan	     Clevertap	        India	Sandeep	21/1/2026	15:00	Miarucus	Mujahid 	Deputy General Manager - Digital	digital@miarcus.com	9307536204
-Jan	     Clevertap	        India	Manshi	22/1/2026	12:00	AertekSmart	Sumita Das	Growth Marketing Manager	sumita.das@aerteksmart.com	9147729484
-Jan	     Clevertap	        India	Manshi	22/1/2026	14:00	dash and do	Rehan Khan	Manager Ecommerce & CRM	rehan@dashanddot.com	8369879288
-Jan	     Clevertap	        India	Sandeep	22/1/2026	18:00	Pureflow Tape	Prikshit	Co-Founder	11prikshit21@gmail.com, founders.office@pureflowtape.com	8284871378
-Jan	     Clevertap	        India	Manshi	23/1/2026	14:30	Old School Rituals	Ram Ganesh	SAP MM Consultant	ramganesh@oldschoolrituals.in	7087456456
-Jan	     Clevertap	        India	Manshi	27/1/2026	12:00	My Pahadi Dukan	Rohan Sehgal	Co-Founder	rohan.sehgal@mypahadidukan.com	88794 54970
-Jan	     Clevertap	        India	Sandeep	27/1/2026	14:00	Hamptons	Harshil Shah	Co-Founder	harshil@baaamboos.com	9374864148
-Jan	     Clevertap	        India	Sandeep	27/1/2026	15:00	Wear duds	Sikandar	Co-Founder and CEO	sikandar@wearduds.com	9871195479
-Jan	     Clevertap	        India	Sandeep	28/1/2026	14:00	Ransho revision	Sahib Singh	Co-Founder	sahib.singh@ranchochemistry.com	88727 78166
-Jan	     Clevertap	        India	Manshi	28/1/2026	15:00	Sage By Mala	Tushar Miglani	Co-Founder	tushar@sagebymala.com	88512 01286
-Jan	     Clevertap	        India	Manshi	28/1/2026	15:30	Fix My Curls	Jayant Shah	Head Of Business	jayant@fixmycurls.com	94113 03207
-Jan	     Clevertap	        India	Manshi	29/1/2026	13:00	Asian Footwears Pvt Ltd	RB Sharma	Business Head- MT & ISD	rbsharma@asianfootwears.com	99112 28742
-Jan	     Clevertap	        India	Manshi	29/1/2026	11:00	Maruti Suzuki       India Limited	Uditha Singh	Head Marketing Analytics and CRM	uditha.singh@maruti.co.in	75750 03910
-Feb	     CleverTap	        India	Manshi	2/2/2026	12:30	DBS Bank	Shariq Shaikh	Performance Marketing & Martech	shariqshaikh@dbs.com	9372700972
-Feb	     CleverTap	        India	Manshi	4/2/2026	13:00	Womancart	Prateek Batra	Head – Marketing & Business Growth	prateek@womancart.in	9755928377
-Feb	     CleverTap	        India	Manshi	5/2/2026	12:30	Neuberg Diagnostics	Vijay Ankush Pashte	AVP and Head of Digital Marketing	vijay.pashte@neubergdiagnostics.com	9022784381
-Feb	     CleverTap	        India	Manshi	6/2/2026	15:00	LOUIS STITCH	Akshat Jangotra	Marketing Head	akshat.jangotra@louisstitch.com	8447397597
-Feb	     CleverTap	        India	Manshi	9/2/2026	14:00	Avishkaar	Dhruv Sharma	E-commerce & Marketing Team Lead	dhruv.sharma@avishkaar.cc	8800101124
-Feb	     CleverTap	        India	Manshi	9/2/2026	16:30	Simplotel	Shuvam Das	Product Manager	shuvam@simplotel.com	86998 38447
-Feb	     CleverTap	        India	Manshi	10/2/2026	14:30	CoFynd	Ashok Kumar	Senior SEO Analyst	ashok@cofynd.com	9016929117
-Feb	     CleverTap	        India	Manshi	10/2/2026	15:00	VEIRDO	Dhaval Ahir	Co-Founder	dhaval@awesomefab.in	7015263003
-Feb	     CleverTap	        India	Manshi	11/2/2026	14:30	Novatr	Harkunwar Singh	CEO	harkunwar@novatr.com	9017181818
-Feb	     CleverTap	        India	Manshi	11/2/2026	11:30	Vummidi Bangaru Jewellers	Deepansh Bhargava	Vice President	deepansh@vummidi.com	9343897011
-Feb	     CleverTap	        India	Manshi	11/2/2026	12:30	Phodu Club	Dhruva Angle	Co-Founder	http://dhruva@phodu.club/	8459073409
-Feb	     CleverTap	        India	Manshi	16/2/2026	13:30	Toolsvilla.com	Chetan Khaitan	Founder & CEO	chetan@toolsvilla.com	8116204055
-Feb	     CleverTap	        India	Manshi	18/2/2026	14:00	Acko	Vipin Nair	Vice President, Brand	vipin.nair@acko.com	9686512738
-Feb	     CleverTap	        India	Manshi	19/2/2026	13:30	The House of Rare	Pulkit Verma	Ecom Head	pulkit@thehouseofrare.com	84474 51930
-Feb	     CleverTap	        India	Manshi	20/2/2026	12:00	P N Gadgil And Sons Ltd	Rahul Patil	Sales Head	rahul.patil@pngsl.com	8956746914
-Feb	     CleverTap	        India	Manshi	20/2/2026	16:00	Alive	vivek	Founder	vivek@iamalive.app	9731735544
-Feb	     CleverTap	        India	Manshi	23/2/2026	11:00	Knowledge Gate	Rupashi Jain	COO & CFO	rupashi@knowledgegate.in	8800540705
-Feb	     CleverTap	        India	Manshi	23/2/2026	12:45	Naaptol Online Shopping Pvt. Ltd	Vice President-Operations	Suresh Dubey	suresh.dubey@naaptol.com	9810828938
-Feb	     CleverTap	        India	Manshi	24/2/2026	14:30	ScaleSauce	Dhruven Turakhia	Digital Performance Marketing	perform.2@scalesauce.co	7977802078
-Feb	     CleverTap	        India	Manshi	25/2/2026	16:00	Banana Club	Senior Digital Marketing Specialist	Lakshmi Charan	ads@bananaclub.co.in	9740377393
-Feb	     CleverTap	        India	Manshi	26/2/2026	11:00	Columbia Sportswear	Program Manager	Manas Jaiswal	manas.jaiswal@chogori       india.com	9794939232
-Feb	     CleverTap	        India	Manshi	26/2/2026	13:00	Spyne	Product Head	Amit Walia	amit@spyne.ai	
-Feb	     CleverTap	        India	Manshi	27/2/2026	13:00	Kaff        India	Head of Marketing	Rupali Singh	rupali.singh@kaff.in	9953772281
-March	     CleverTap	        India	Manshi	2/3/2026	16:00	1 Finance	Senior Manager	Aniket Mohite	aniket.mohite@1finance.co.in	9326864768
-March	     CleverTap	        India	Manshi	3/3/2026	11:00	Dressfolk	Senior Manager Ecommerce	Apar Singh	apar.s@dressfolk.com	8860014420
-March	     CleverTap	        India	Manshi	5/3/2026	11:00	Antinorm	Finance and Growth Head	Shivangi Sardana	shivangi@antinorm.co	9818227922
-March	     CleverTap	        India	Manshi	10/3/2026	12:00	UNIVO Education	Chief Executive Officer	Siddharth Banerjee	sbanerjee@univoedtech.com	9619218989
-March	     CleverTap	        India	Manshi	10/3/2026	12:30	Capri Global Capital	Product Manager	Lakhshya Khurana	lakhshya.khurana@capriglobal.in	8826373942
-March	     CleverTap	        India	Manshi	10/3/2026	15:00	Equentis	Senior General Manager	Aatish Shah	aatish.shah@equentis.com	9870796006
-March	     CleverTap	        India	Manshi	10/3/2026	13:00	Explurger	Vice President Marketing	Kush Bhardwaj	kush.bhardwaj@explurger.com	9999071802
-March	     CleverTap	        India	Manshi	10/3/2026	15:00	Freshcon        India	Marketing Manager	Dimpy Gupta	dimpy.gupta@freshcon        india.com	9930080890
-March	     CleverTap	        India	Manshi	14/3/2026	15:00	Prudent Corporate Advisory Services	Head, Performance Marketing	Poonam Moridhara	poonam.m@prudentcorporate.com	7622098574
-March	     CleverTap	        India	Manshi	16/3/2026	12:30	TechnoSport	Head - Brand Marketing and Communication	Patralika Agrawal	patralika.agrawal@technosport.in	9900780239
-March	     CleverTap	        India	Manshi	17/3/2026	13:00	So Fetch Shop	Cofounder	Abhimanyu Malik	abhimanyu@sofetchshop.com	
-March	     CleverTap	        India	Manshi	23/3/2026	13:00	ANNY	Chief Growth Officer	Ritika Goel	ritika.goel@styleanny.in	8968574997
-March	     CleverTap	        India	Manshi	24/3/2026	11:30	Vehicleinfo	Chief Executive Officer	Chirag Pipaliya	chirag@vehicleinfo.app	9033993750
-March	     CleverTap	        India	Manshi	24/3/2026	17:30	Femmella	Director	Kavya Arora	kavya@femella.in	9810030972
-March	     CleverTap	        India	Manshi	25/3/2026	12:30	Edme Insurance Brokers	Senior Marketing Manager	Shilpa Saini	shilpa.saini@edmeinsurance.com	7296819089
-March	     CleverTap	        India	Manshi	25/3/2026	14:30	CashRich	Head, Product Management	Ashwin Ks	ashwin@cashrich.com	9892856478
-March	     CleverTap	        India	Manshi	26/3/2026	16:00	Brand Concepts Limited	Digital Marketing Specialist	Kuldeep Thakur	kuldeep.thakur@brandconcepts.in	9993330505
-March	     CleverTap	        India	Manshi	30/3/2026	13:00	Overlays Clothing Pvt Ltd	Marketing Manager & Executive Assistant	Mahee Jain	mahee@overlaysclothing.com	
-March	     CleverTap	        India	Manshi	31/3/2026	12:30	M2M Ferries	Director	Devika Saigal	devika@m2mferries.com	9967976969
-March	     CleverTap	        India	Manshi	31/3/2026	15:00	Vasundhara Infotech	Chief Marketing Officer	Somish Kakadiya	somish@vasundhara.io	9409017007
+Project	     Campaign Owner	       AM	    Weekly Target	Monthly Target	Meeting Completed 	Meeting Booked         Leads Uploaded(1-4-2026)             Leads Uploaded(2-4-2026)            Leads Uploaded(3-4-2026)        Leads Uploaded(6-4-2026)
+Thyleads	    Rashi	         Sandeep	    5	            20	                4	               1	
+							
+
+Clevertap- In	Naman	         Manshi	            8	            40	            3	               6	                    205	                                    201	                            208			                    190
+
+BlueDove	    Naman	         Manshi	            1	             3			    1			                                                                        130	                            110
+										
+Evality	        Naman	         Manshi	            3	            15				                                                                                                                    280(Account mined)		
+										
+Onecap	        Mridul	        Krishna	            3	             8		        2			                                                                        195                             236	
+										
+Mynd	        Mridul	        Krishna	            3	             8	            1	                1                       448	                                                                    307                             460			
+										
+Actyv	        Mridul	        Krishna	            3	             8		        2			                                154                                                                     372	
+										
+Zigtal	        Mridul	        Krishna	            3	             8	            1	                3				        328
+										
+VWO	            Rajesh	        Kunal	            6	             12						
+										
+Pazo	        Rajesh	        Kunal	            2	              8	            3	                3				
+										
+Venwiz	        Rajesh	        Kunal	            5	              5	            1	                1	            			
+										
+InFeedo	        Rajesh	        Kunal	            3	              10						
+																				
