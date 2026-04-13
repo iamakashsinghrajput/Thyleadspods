@@ -2,6 +2,13 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "./auth-context";
+import { allChatUserIds, allChatUsers, getUserId } from "./chat-users";
+import { showToast } from "@/components/toast-banner";
+
+interface PendingToast {
+  senderName: string;
+  count: number;
+}
 
 interface UnreadMap {
   [senderId: string]: number;
@@ -15,8 +22,6 @@ interface ChatContextType {
 
 const ChatContext = createContext<ChatContextType | null>(null);
 
-const allUserIds = ["admin", "kunal", "rajesh", "mansi", "naman", "krishna", "mridul", "sandeep", "rashi"];
-
 function getChatId(a: string, b: string) {
   return [a, b].sort().join("_");
 }
@@ -26,13 +31,29 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const [unreadMap, setUnreadMap] = useState<UnreadMap>({});
   const lastSeenRef = useRef<Record<string, string>>({});
   const prevCountRef = useRef(0);
+  const pendingToastRef = useRef<PendingToast | null>(null);
+  const [toastTrigger, setToastTrigger] = useState(0);
 
-  const myId = user?.name?.toLowerCase() ?? "";
+  const myId = user ? getUserId(user.name) : "";
+
+  useEffect(() => {
+    if (toastTrigger === 0) return;
+    const pending = pendingToastRef.current;
+    if (pending) {
+      showToast({
+        title: pending.senderName,
+        message: pending.count > 1 ? `Sent you ${pending.count} messages` : "Sent you a message",
+        type: "chat",
+        link: "/chat",
+      });
+      pendingToastRef.current = null;
+    }
+  }, [toastTrigger]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    audioRef.current = new Audio("/chat.wav");
+    audioRef.current = new Audio("/chat.mp3");
     audioRef.current.volume = 1.0;
     if (Notification.permission === "default") {
       Notification.requestPermission();
@@ -41,7 +62,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const playSound = useCallback((senderName?: string) => {
     try {
-      if (audioRef.current) {
+      if (audioRef.current && audioRef.current.paused) {
         audioRef.current.currentTime = 0;
         audioRef.current.play().catch(() => {});
       }
@@ -57,7 +78,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const checkUnread = useCallback(async () => {
     if (!myId) return;
-    const others = allUserIds.filter((id) => id !== myId);
+    const others = allChatUserIds.filter((id) => id !== myId);
     const newMap: UnreadMap = {};
 
     await Promise.all(
@@ -79,12 +100,23 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
     setUnreadMap((prev) => {
       const merged = { ...prev };
+      const newSenders: string[] = [];
       for (const [k, v] of Object.entries(newMap)) {
+        const prevCount = prev[k] || 0;
         merged[k] = (merged[k] || 0) + v;
+        if (merged[k] > prevCount) newSenders.push(k);
       }
       const newTotal = Object.values(merged).reduce((a, b) => a + b, 0);
       if (newTotal > prevCountRef.current) {
-        playSound();
+        const senderName = newSenders.length > 0
+          ? (allChatUsers.find((u) => u.id === newSenders[0])?.name || newSenders[0])
+          : undefined;
+        playSound(senderName);
+        if (senderName) {
+          const count = newSenders.reduce((s, id) => s + ((newMap[id] || 0) - (prev[id] || 0)), 0);
+          pendingToastRef.current = { senderName, count };
+          setToastTrigger((t) => t + 1);
+        }
       }
       prevCountRef.current = newTotal;
       return merged;

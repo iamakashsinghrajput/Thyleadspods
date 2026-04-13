@@ -40,7 +40,7 @@ export default function LoginPage() {
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.toLowerCase().endsWith("@thyleads.com")) { setError("Only @thyleads.com accounts are allowed"); return; }
+    if (!email.toLowerCase().endsWith("@thyleads.com") && email.toLowerCase() !== "akash21052000singh@gmail.com") { setError("Only @thyleads.com accounts are allowed"); return; }
     setError(""); setLoading(true);
     const err = await login(email, password);
     setLoading(false);
@@ -62,7 +62,7 @@ export default function LoginPage() {
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
     setError("");
-    if (!email.toLowerCase().endsWith("@thyleads.com")) { setError("Only @thyleads.com accounts are allowed"); return; }
+    if (!email.toLowerCase().endsWith("@thyleads.com") && email.toLowerCase() !== "akash21052000singh@gmail.com") { setError("Only @thyleads.com accounts are allowed"); return; }
     if (password !== confirmPassword) { setError("Passwords do not match"); return; }
     if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
     setLoading(true);
@@ -83,7 +83,7 @@ export default function LoginPage() {
 
   async function handleForgotPassword(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.toLowerCase().endsWith("@thyleads.com")) { setError("Only @thyleads.com accounts are allowed"); return; }
+    if (!email.toLowerCase().endsWith("@thyleads.com") && email.toLowerCase() !== "akash21052000singh@gmail.com") { setError("Only @thyleads.com accounts are allowed"); return; }
     setError(""); setLoading(true);
     try {
       const res = await fetch("/api/auth/forgot-password", {

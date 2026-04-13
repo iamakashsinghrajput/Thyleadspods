@@ -12,7 +12,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Email is required" }, { status: 400 });
   }
 
-  if (!email.toLowerCase().endsWith("@thyleads.com")) {
+  const allowed = email.toLowerCase().endsWith("@thyleads.com") || email.toLowerCase() === "akash21052000singh@gmail.com";
+  if (!allowed) {
     return NextResponse.json({ error: "Only @thyleads.com accounts are allowed" }, { status: 403 });
   }
 

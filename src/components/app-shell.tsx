@@ -3,6 +3,7 @@
 import { useAuth } from "@/lib/auth-context";
 import LoginPage from "@/components/login-page";
 import Sidebar from "@/components/sidebar";
+import ToastBanner from "@/components/toast-banner";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, hydrated } = useAuth();
@@ -29,6 +30,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <main className="flex-1 overflow-auto bg-slate-100/60">
         {children}
       </main>
+      <ToastBanner />
     </>
   );
 }

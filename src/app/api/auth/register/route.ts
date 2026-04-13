@@ -17,7 +17,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
   }
 
-  if (!email.toLowerCase().endsWith("@thyleads.com")) {
+  const allowed = email.toLowerCase().endsWith("@thyleads.com") || email.toLowerCase() === "akash21052000singh@gmail.com";
+  if (!allowed) {
     return NextResponse.json({ error: "Only @thyleads.com email addresses are allowed" }, { status: 403 });
   }
 

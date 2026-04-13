@@ -9,6 +9,7 @@ export async function GET(req: NextRequest) {
 
   const messages = await Message.find({
     chatId: { $regex: userId },
+    deletedBy: { $ne: userId },
   }).sort({ createdAt: -1 }).lean();
 
   const conversations: Record<string, { text: string; senderName: string; sender: string; createdAt: string }> = {};

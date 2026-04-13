@@ -21,6 +21,7 @@ const MessageSchema = new Schema({
     }],
     default: [],
   },
+  deletedBy: { type: [String], default: [] },
   createdAt: { type: Date, default: Date.now },
 }, { strict: false });
 

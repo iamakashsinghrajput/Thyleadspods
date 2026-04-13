@@ -41,7 +41,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    audioRef.current = new Audio("/notification.wav");
+    audioRef.current = new Audio("/notification.mp3");
     audioRef.current.volume = 1.0;
     if (typeof window !== "undefined" && "Notification" in window && window.Notification.permission === "default") {
       window.Notification.requestPermission();
@@ -50,7 +50,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   const playSound = useCallback((message?: string) => {
     try {
-      if (audioRef.current) {
+      if (audioRef.current && audioRef.current.paused) {
         audioRef.current.currentTime = 0;
         audioRef.current.play().catch(() => {});
       }

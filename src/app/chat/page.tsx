@@ -5,8 +5,7 @@ import { Send, Search, MessageSquare, Users, Star, Archive, Trash2, MoreVertical
 import { useAuth } from "@/lib/auth-context";
 import { useChat } from "@/lib/chat-context";
 import { usePresence } from "@/lib/presence-context";
-
-interface ChatUser { id: string; name: string; role: "superadmin" | "admin" | "pod"; podId?: string; avatarUrl?: string; }
+import { allChatUsers, getUserId, type ChatUser } from "@/lib/chat-users";
 interface Reaction { emoji: string; userId: string; userName: string; }
 interface ReplyInfo { messageId: string; senderName: string; text: string; }
 interface Message { _id: string; chatId: string; sender: string; senderName: string; text: string; replyInfo?: ReplyInfo | null; reactions: Reaction[]; createdAt: string; }
@@ -14,19 +13,7 @@ interface LastMsg { text: string; senderName: string; sender: string; createdAt:
 
 const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
-const allUsers: ChatUser[] = [
-  { id: "akash", name: "Akash", role: "superadmin" },
-  { id: "bharath", name: "Bharath", role: "admin" },
-  { id: "sales", name: "Sales", role: "admin" },
-  { id: "kunal", name: "Kunal", role: "pod", podId: "pod1" },
-  { id: "rajesh", name: "Rajesh", role: "pod", podId: "pod1" },
-  { id: "mansi", name: "Mansi", role: "pod", podId: "pod2" },
-  { id: "naman", name: "Naman", role: "pod", podId: "pod2" },
-  { id: "krishna", name: "Krishna", role: "pod", podId: "pod3" },
-  { id: "mridul", name: "Mridul", role: "pod", podId: "pod3" },
-  { id: "sandeep", name: "Sandeep", role: "pod", podId: "pod4" },
-  { id: "rashi", name: "Rashi", role: "pod", podId: "pod4" },
-];
+const allUsers = allChatUsers;
 
 function getChatId(a: string, b: string) { return [a, b].sort().join("_"); }
 const ac = ["bg-[#6800FF]", "bg-emerald-500", "bg-purple-500", "bg-orange-500", "bg-sky-500", "bg-rose-500", "bg-teal-500", "bg-amber-500", "bg-cyan-500"];
@@ -55,7 +42,7 @@ export default function ChatPage() {
   const lastFetchRef = useRef<string | null>(null);
 
   if (!user) return null;
-  const myId = user.name.toLowerCase();
+  const myId = getUserId(user.name);
   const chatUsers = allUsers.filter((u) => u.id !== myId);
 
   useEffect(() => {
@@ -88,7 +75,7 @@ export default function ChatPage() {
 
   const fetchMessages = useCallback(async (full = false) => {
     if (!chatId) return;
-    const p = new URLSearchParams({ chatId });
+    const p = new URLSearchParams({ chatId, userId: myId });
     if (!full && lastFetchRef.current) p.set("after", lastFetchRef.current);
     const r = await fetch(`/api/messages?${p}`);
     const d = await r.json();
@@ -108,7 +95,7 @@ export default function ChatPage() {
   useEffect(() => {
     if (!chatId) return;
     const refreshReactions = async () => {
-      const r = await fetch(`/api/messages?${new URLSearchParams({ chatId })}`);
+      const r = await fetch(`/api/messages?${new URLSearchParams({ chatId, userId: myId })}`);
       const d = await r.json();
       const all: Message[] = d.messages.map((m: Message) => ({ ...m, reactions: m.reactions ?? [] }));
       setMessages(all);
@@ -137,14 +124,14 @@ export default function ChatPage() {
   }
 
   async function deleteMessage(msgId: string) {
-    await fetch("/api/messages/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messageId: msgId }) });
+    await fetch("/api/messages/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ messageId: msgId, userId: myId }) });
     setMessages((prev) => prev.filter((m) => m._id !== msgId));
     setDeleteConfirm(null);
   }
 
   async function deleteChat(uid: string) {
     const cid = getChatId(myId, uid);
-    await fetch("/api/messages/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chatId: cid }) });
+    await fetch("/api/messages/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chatId: cid, userId: myId }) });
     if (selectedUser?.id === uid) { setSelectedUser(null); setMessages([]); }
     setChatMenu(null);
     fetchLatest();

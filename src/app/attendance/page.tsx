@@ -23,6 +23,7 @@ import {
   LinkIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { getUserId } from "@/lib/chat-users";
 
 interface RegRequest {
   _id: string;
@@ -174,7 +175,7 @@ export default function AttendancePage() {
   const [calendarConnecting, setCalendarConnecting] = useState(false);
 
   const nextHoliday = getNextHoliday();
-  const userId = user?.name?.toLowerCase().replace(/\s/g, "") ?? "";
+  const userId = user ? getUserId(user.name) : "";
   const todayDate = new Date().toISOString().split("T")[0];
 
   const fetchToday = useCallback(async () => {

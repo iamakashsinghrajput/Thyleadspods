@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useAuth } from "./auth-context";
+import { getUserId } from "./chat-users";
 
 interface PresenceContextType {
   onlineUsers: Set<string>;
@@ -17,7 +18,7 @@ export function PresenceProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
 
-  const userId = user?.name?.toLowerCase().replace(/\s/g, "") ?? "";
+  const userId = user ? getUserId(user.name) : "";
 
   useEffect(() => {
     if (!userId || !user) return;

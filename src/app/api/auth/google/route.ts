@@ -35,7 +35,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Google email not verified" }, { status: 401 });
   }
 
-  if (!payload.email.toLowerCase().endsWith("@thyleads.com")) {
+  const allowed = payload.email.toLowerCase().endsWith("@thyleads.com") || payload.email.toLowerCase() === "akash21052000singh@gmail.com";
+  if (!allowed) {
     return NextResponse.json({ error: "Only @thyleads.com accounts are allowed" }, { status: 403 });
   }
 

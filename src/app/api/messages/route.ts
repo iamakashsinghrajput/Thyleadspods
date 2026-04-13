@@ -8,8 +8,10 @@ export async function GET(req: NextRequest) {
   if (!chatId) return NextResponse.json({ messages: [] });
 
   const after = req.nextUrl.searchParams.get("after");
+  const userId = req.nextUrl.searchParams.get("userId");
   const query: Record<string, unknown> = { chatId };
   if (after) query.createdAt = { $gt: new Date(after) };
+  if (userId) query.deletedBy = { $ne: userId };
 
   const raw = await Message.find(query).sort({ createdAt: 1 }).limit(200).lean();
   const messages = raw.map((m) => ({
