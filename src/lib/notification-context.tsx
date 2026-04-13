@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
 
 export interface Notification {
   id: string;
@@ -38,49 +38,29 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   useEffect(() => { if (loaded) localStorage.setItem("thyleads_notifications", JSON.stringify(notifications)); }, [notifications, loaded]);
 
-  const playSound = useCallback(() => {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    audioRef.current = new Audio("/notification.wav");
+    audioRef.current.volume = 1.0;
+    if (typeof window !== "undefined" && "Notification" in window && window.Notification.permission === "default") {
+      window.Notification.requestPermission();
+    }
+  }, []);
+
+  const playSound = useCallback((message?: string) => {
     try {
-      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-
-      const master = ctx.createGain();
-      master.gain.value = 1.0;
-      master.connect(ctx.destination);
-
-      const notes = [
-        { freq: 587, start: 0, dur: 0.2 },
-        { freq: 784, start: 0.2, dur: 0.2 },
-        { freq: 880, start: 0.4, dur: 0.35 },
-      ];
-
-      notes.forEach(({ freq, start, dur }) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(master);
-        osc.type = "triangle";
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0, ctx.currentTime + start);
-        gain.gain.linearRampToValueAtTime(1.0, ctx.currentTime + start + 0.01);
-        gain.gain.setValueAtTime(1.0, ctx.currentTime + start + dur * 0.7);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
-        osc.start(ctx.currentTime + start);
-        osc.stop(ctx.currentTime + start + dur);
-
-        const osc2 = ctx.createOscillator();
-        const gain2 = ctx.createGain();
-        osc2.connect(gain2);
-        gain2.connect(master);
-        osc2.type = "sine";
-        osc2.frequency.value = freq * 2;
-        gain2.gain.setValueAtTime(0, ctx.currentTime + start);
-        gain2.gain.linearRampToValueAtTime(0.4, ctx.currentTime + start + 0.01);
-        gain2.gain.setValueAtTime(0.4, ctx.currentTime + start + dur * 0.5);
-        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
-        osc2.start(ctx.currentTime + start);
-        osc2.stop(ctx.currentTime + start + dur);
-      });
-
-      setTimeout(() => ctx.close(), 1200);
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(() => {});
+      }
+      if (typeof window !== "undefined" && "Notification" in window && window.Notification.permission === "granted" && document.hidden) {
+        new window.Notification("Thyleads — Notification", {
+          body: message || "You have a new notification",
+          icon: "/logo.png",
+          tag: "thyleads-notification",
+        });
+      }
     } catch {}
   }, []);
 

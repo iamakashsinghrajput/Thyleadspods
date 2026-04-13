@@ -29,43 +29,29 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const myId = user?.name?.toLowerCase() ?? "";
 
-  const playSound = useCallback(() => {
-    try {
-      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      const master = ctx.createGain();
-      master.gain.value = 1.0;
-      master.connect(ctx.destination);
-      const notes = [
-        { freq: 523, start: 0, dur: 0.18 },
-        { freq: 659, start: 0.18, dur: 0.25 },
-      ];
-      notes.forEach(({ freq, start, dur }) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(master);
-        osc.type = "triangle";
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0, ctx.currentTime + start);
-        gain.gain.linearRampToValueAtTime(1.0, ctx.currentTime + start + 0.01);
-        gain.gain.setValueAtTime(1.0, ctx.currentTime + start + dur * 0.6);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
-        osc.start(ctx.currentTime + start);
-        osc.stop(ctx.currentTime + start + dur);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-        const osc2 = ctx.createOscillator();
-        const gain2 = ctx.createGain();
-        osc2.connect(gain2);
-        gain2.connect(master);
-        osc2.type = "sine";
-        osc2.frequency.value = freq * 2;
-        gain2.gain.setValueAtTime(0, ctx.currentTime + start);
-        gain2.gain.linearRampToValueAtTime(0.35, ctx.currentTime + start + 0.01);
-        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
-        osc2.start(ctx.currentTime + start);
-        osc2.stop(ctx.currentTime + start + dur);
-      });
-      setTimeout(() => ctx.close(), 800);
+  useEffect(() => {
+    audioRef.current = new Audio("/chat.wav");
+    audioRef.current.volume = 1.0;
+    if (Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  const playSound = useCallback((senderName?: string) => {
+    try {
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(() => {});
+      }
+      if (Notification.permission === "granted" && document.hidden) {
+        new Notification("Thyleads — New Message", {
+          body: senderName ? `${senderName} sent you a message` : "You have a new message",
+          icon: "/logo.png",
+          tag: "thyleads-chat",
+        });
+      }
     } catch {}
   }, []);
 
