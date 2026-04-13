@@ -32,6 +32,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
   }
 
+  if (user.role === "client") {
+    return NextResponse.json({
+      user: {
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        projectId: user.projectId || undefined,
+        approverId: user.approverId || "",
+        avatarUrl: user.avatarUrl || undefined,
+      },
+    });
+  }
+
   const otp = String(Math.floor(100000 + Math.random() * 900000));
   await OtpModel.deleteMany({ email: email.toLowerCase(), type: "login" });
   await OtpModel.create({

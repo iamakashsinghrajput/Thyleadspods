@@ -10,7 +10,6 @@ import {
   Plus,
   ChevronDown,
   LogOut,
-  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -19,7 +18,6 @@ import {
 } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import { useAuth } from "@/lib/auth-context";
-import { useChat } from "@/lib/chat-context";
 import { useSidebar } from "@/lib/sidebar-context";
 import ConfirmDelete from "@/components/confirm-delete";
 
@@ -30,7 +28,6 @@ export default function Sidebar() {
   const [editingPodId, setEditingPodId] = useState<string | null>(null);
   const [editMembers, setEditMembers] = useState("");
   const isAdmin = user?.role === "admin" || user?.role === "superadmin";
-  const { totalUnread } = useChat();
   const { collapsed, toggle } = useSidebar();
   const [podsOpen, setPodsOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -50,7 +47,6 @@ export default function Sidebar() {
   const navItems = [
     { href: "/", icon: isAdmin ? LayoutDashboard : FolderKanban, label: isAdmin ? "Dashboard" : "My Projects", exact: true },
     { href: "/attendance", icon: Clock, label: "Attendance", exact: false },
-    { href: "/chat", icon: MessageSquare, label: "Messages", exact: false, badge: totalUnread },
   ];
 
   if (collapsed) {
@@ -69,7 +65,6 @@ export default function Sidebar() {
             return (
               <Link key={item.href} href={item.href} className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isActive ? "bg-[#f0e6ff] text-[#6800FF]" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"}`} title={item.label}>
                 <Icon size={20} />
-                {(item.badge ?? 0) > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 flex items-center justify-center px-1 bg-red-500 text-white text-[9px] font-bold rounded-full">{item.badge}</span>}
               </Link>
             );
           })}
@@ -118,9 +113,6 @@ export default function Sidebar() {
                 {isActive && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-[#6800FF] rounded-r-full" />}
                 <Icon size={18} />
                 <span className="text-sm flex-1">{item.label}</span>
-                {(item.badge ?? 0) > 0 && (
-                  <span className="min-w-5 h-5 flex items-center justify-center px-1.5 bg-red-500 text-white text-[10px] font-bold rounded-full">{item.badge! > 99 ? "99+" : item.badge}</span>
-                )}
               </Link>
             );
           })}

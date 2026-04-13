@@ -15,6 +15,18 @@ const SEED_USERS = [
   { name: "Mridul", email: "mridul@thyleads.com", password: "pod123", role: "pod", podId: "pod3", approverId: "bharath" },
   { name: "Sandeep", email: "sandeep@thyleads.com", password: "pod123", role: "pod", podId: "pod4", approverId: "bharath" },
   { name: "Rashi", email: "rashi@thyleads.com", password: "pod123", role: "pod", podId: "pod4", approverId: "bharath" },
+  { name: "Thyleads", email: "portal-thyleads@thyleads.com", password: "client123", role: "client", projectId: "p1" },
+  { name: "CleverTap", email: "portal-clevertap@thyleads.com", password: "client123", role: "client", projectId: "p2" },
+  { name: "BlueDove", email: "portal-bluedove@thyleads.com", password: "client123", role: "client", projectId: "p3" },
+  { name: "Evality", email: "portal-evality@thyleads.com", password: "client123", role: "client", projectId: "p4" },
+  { name: "Onecap", email: "portal-onecap@thyleads.com", password: "client123", role: "client", projectId: "p5" },
+  { name: "Mynd", email: "portal-mynd@thyleads.com", password: "client123", role: "client", projectId: "p6" },
+  { name: "Actyv", email: "portal-actyv@thyleads.com", password: "client123", role: "client", projectId: "p7" },
+  { name: "Zigtal", email: "portal-zigtal@thyleads.com", password: "client123", role: "client", projectId: "p8" },
+  { name: "VWO", email: "portal-vwo@thyleads.com", password: "client123", role: "client", projectId: "p9" },
+  { name: "Pazo", email: "portal-pazo@thyleads.com", password: "client123", role: "client", projectId: "p10" },
+  { name: "Venwiz", email: "portal-venwiz@thyleads.com", password: "client123", role: "client", projectId: "p11" },
+  { name: "InFeedo", email: "portal-infeedo@thyleads.com", password: "client123", role: "client", projectId: "p12" },
 ];
 
 export async function POST() {
@@ -32,6 +44,7 @@ export async function POST() {
       password: hashed,
       role: u.role,
       podId: u.podId || "",
+      projectId: u.projectId || "",
       approverId: u.approverId || "",
       verified: true,
     });

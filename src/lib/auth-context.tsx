@@ -3,13 +3,14 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
-export type UserRole = "superadmin" | "admin" | "pod";
+export type UserRole = "superadmin" | "admin" | "pod" | "client";
 
 export interface User {
   name: string;
   email: string;
   role: UserRole;
   podId?: string;
+  projectId?: string;
   avatarUrl?: string;
   approverId: string;
 }

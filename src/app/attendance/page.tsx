@@ -164,6 +164,8 @@ export default function AttendancePage() {
   const [showLeavePopup, setShowLeavePopup] = useState(false);
   const [leaveStep, setLeaveStep] = useState<"select" | "application">("select");
   const [leaveType, setLeaveType] = useState("");
+  const [customReason, setCustomReason] = useState("");
+  const [leaveBody, setLeaveBody] = useState("");
   const [leaveDate, setLeaveDate] = useState(new Date().toISOString().split("T")[0]);
   const [leaveLoading, setLeaveLoading] = useState(false);
   const [myLeaveRequests, setMyLeaveRequests] = useState<LeaveRequest[]>([]);
@@ -173,6 +175,7 @@ export default function AttendancePage() {
   const [calendarConnected, setCalendarConnected] = useState<boolean | null>(null);
   const [showMeetingsPopup, setShowMeetingsPopup] = useState(false);
   const [calendarConnecting, setCalendarConnecting] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   const nextHoliday = getNextHoliday();
   const userId = user ? getUserId(user.name) : "";
@@ -196,6 +199,11 @@ export default function AttendancePage() {
       setMonthRecords(data.records || []);
     } catch {}
   }, [userId, calMonth, calYear]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -345,11 +353,10 @@ export default function AttendancePage() {
   }
 
   async function submitLeaveApplication() {
-    if (!user || !leaveType || !leaveDate) return;
+    if (!user || !leaveType || !leaveDate || !leaveBody.trim()) return;
     setLeaveLoading(true);
-    const subject = `Application for ${leaveType} on ${new Date(leaveDate).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}`;
-    const approverName = user.approverId ? user.approverId.charAt(0).toUpperCase() + user.approverId.slice(1) : "Admin";
-    const appBody = `Dear ${approverName},\n\nI am writing to formally request ${leaveType.toLowerCase()} on ${new Date(leaveDate).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}.\n\nLeave Type: ${leaveType}\nDate: ${leaveDate}\n\nI kindly request you to approve my leave application.\n\nThank you.\n\nRegards,\n${user.name}`;
+    const reason = leaveType === "Other" ? customReason.trim() : leaveType;
+    const subject = `Application for ${reason} on ${new Date(leaveDate).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}`;
     try {
       const res = await fetch("/api/leave", {
         method: "POST",
@@ -359,9 +366,9 @@ export default function AttendancePage() {
           userId,
           userName: user.name,
           leaveDate,
-          leaveType,
+          leaveType: reason,
           subject,
-          body: appBody,
+          body: leaveBody,
           approverId: user.approverId,
         }),
       });
@@ -372,6 +379,8 @@ export default function AttendancePage() {
         setShowLeavePopup(false);
         setLeaveStep("select");
         setLeaveType("");
+        setCustomReason("");
+        setLeaveBody("");
         setLeaveDate(new Date().toISOString().split("T")[0]);
         await fetchMyLeaveRequests();
       }
@@ -404,13 +413,6 @@ export default function AttendancePage() {
     } catch {}
     setRegLoading(false);
   }
-
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!today?.punchIn || today?.punchOut) return;
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [today]);
 
   if (!user) return null;
 
@@ -674,7 +676,7 @@ export default function AttendancePage() {
                         </p>
                       </div>
                     );
-                  })(), onClick: () => { setShowLeavePopup(true); setLeaveStep("select"); setLeaveType(""); } },
+                  })(), onClick: () => { setShowLeavePopup(true); setLeaveStep("select"); setLeaveType(""); setCustomReason(""); setLeaveBody(""); } },
                   { icon: ArrowRight, title: "Holiday", desc: null, extra: <><p className="text-sm font-semibold text-[#6800FF] mb-0.5">{nextHoliday.date.split("-")[2]} {nextHoliday.name}</p><p className="text-sm font-semibold text-slate-900">{nextHoliday.day}</p></>, onClick: () => setShowHolidays(true) },
                   { icon: Video, title: "Meeting", desc: null, extra: (() => {
                     if (calendarConnected === false) return <p className="text-sm text-slate-400">Connect calendar</p>;
@@ -738,7 +740,7 @@ export default function AttendancePage() {
                   </div>
                   <p className="text-2xl font-medium text-slate-900 mb-6">{leavesTaken} <span className="text-sm text-slate-400">days</span></p>
                   <button
-                    onClick={() => { setShowLeavePopup(true); setLeaveStep("select"); setLeaveType(""); }}
+                    onClick={() => { setShowLeavePopup(true); setLeaveStep("select"); setLeaveType(""); setCustomReason(""); setLeaveBody(""); }}
                     className="w-full py-3 bg-[#6800FF] hover:bg-[#5800DD] text-white font-semibold rounded-full transition-colors mt-auto"
                   >
                     Apply for leave
@@ -1026,9 +1028,30 @@ export default function AttendancePage() {
                     </div>
                   </div>
 
+                  {leaveType === "Other" && (
+                    <div>
+                      <label className="text-xs font-semibold text-slate-400 uppercase mb-2 block">Specify Reason</label>
+                      <input
+                        type="text"
+                        value={customReason}
+                        onChange={(e) => setCustomReason(e.target.value)}
+                        placeholder="Enter your reason for leave..."
+                        className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#6800FF] focus:ring-1 focus:ring-[#6800FF]/20"
+                      />
+                    </div>
+                  )}
+
                   <button
-                    onClick={() => { if (leaveType && leaveDate) setLeaveStep("application"); }}
-                    disabled={!leaveType || !leaveDate}
+                    onClick={() => {
+                      if (leaveType && leaveDate && (leaveType !== "Other" || customReason.trim())) {
+                        const reason = leaveType === "Other" ? customReason.trim() : leaveType;
+                        const approverName = user.approverId ? user.approverId.charAt(0).toUpperCase() + user.approverId.slice(1) : "Admin";
+                        const dateFormatted = new Date(leaveDate).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+                        setLeaveBody(`Dear ${approverName},\n\nI am writing to formally request ${reason.toLowerCase()} on ${dateFormatted}.\n\nLeave Type: ${reason}\nDate: ${leaveDate}\n\nI kindly request you to approve my leave application.\n\nThank you.\n\nRegards,\n${user.name}`);
+                        setLeaveStep("application");
+                      }
+                    }}
+                    disabled={!leaveType || !leaveDate || (leaveType === "Other" && !customReason.trim())}
                     className="w-full py-3.5 bg-[#6800FF] hover:bg-[#5800DD] disabled:bg-slate-200 disabled:text-slate-400 text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
                   >
                     <ArrowRight size={16} /> Review Application
@@ -1084,37 +1107,33 @@ export default function AttendancePage() {
                       )}
                       <div className="flex items-center justify-between bg-white rounded-lg p-3 border border-slate-100">
                         <span className="text-xs font-semibold text-slate-400 uppercase">Subject</span>
-                        <span className="font-medium text-slate-800">Application for {leaveType}</span>
+                        <span className="font-medium text-slate-800">Application for {leaveType === "Other" ? customReason : leaveType}</span>
                       </div>
 
-                      <div className="bg-white rounded-lg p-4 border border-slate-100 space-y-3">
-                        <p>Dear {user.approverId ? user.approverId.charAt(0).toUpperCase() + user.approverId.slice(1) : "Admin"},</p>
-                        <p>
-                          I am writing to formally request <span className="font-semibold text-[#6800FF]">{leaveType.toLowerCase()}</span> on{" "}
-                          <span className="font-semibold">
-                            {new Date(leaveDate).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
-                          </span>.
-                        </p>
-
-                        <div className="grid grid-cols-2 gap-3 my-3">
-                          <div className="bg-slate-50 rounded-lg p-3">
-                            <p className="text-[10px] font-semibold text-slate-400 uppercase">Leave Type</p>
-                            <p className="text-sm font-bold text-slate-800 mt-0.5">{leaveType}</p>
-                          </div>
-                          <div className="bg-slate-50 rounded-lg p-3">
-                            <p className="text-[10px] font-semibold text-slate-400 uppercase">Date</p>
-                            <p className="text-sm font-bold text-slate-800 mt-0.5">
-                              {new Date(leaveDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                            </p>
-                          </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-white rounded-lg p-3 border border-slate-100">
+                          <p className="text-[10px] font-semibold text-slate-400 uppercase">Leave Type</p>
+                          <p className="text-sm font-bold text-slate-800 mt-0.5">{leaveType === "Other" ? customReason : leaveType}</p>
                         </div>
-
-                        <p>I kindly request you to approve my leave application.</p>
-                        <p>Thank you.</p>
-                        <div className="pt-2 border-t border-slate-100">
-                          <p className="font-medium">Regards,</p>
-                          <p className="font-bold text-slate-900">{user.name}</p>
+                        <div className="bg-white rounded-lg p-3 border border-slate-100">
+                          <p className="text-[10px] font-semibold text-slate-400 uppercase">Date</p>
+                          <p className="text-sm font-bold text-slate-800 mt-0.5">
+                            {new Date(leaveDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </p>
                         </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-xs font-semibold text-slate-400 uppercase">Application</label>
+                          <span className="text-[10px] text-slate-400">You can edit this</span>
+                        </div>
+                        <textarea
+                          value={leaveBody}
+                          onChange={(e) => setLeaveBody(e.target.value)}
+                          rows={10}
+                          className="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 leading-relaxed focus:outline-none focus:border-[#6800FF] focus:ring-1 focus:ring-[#6800FF]/20 resize-none"
+                        />
                       </div>
                     </div>
                   </div>

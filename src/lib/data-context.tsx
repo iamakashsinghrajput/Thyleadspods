@@ -58,7 +58,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const DATA_VERSION = "v11";
+    const DATA_VERSION = "v13";
     try {
       if (localStorage.getItem("thyleads_data_version") !== DATA_VERSION) {
         localStorage.removeItem("thyleads_projects");

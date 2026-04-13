@@ -22,13 +22,13 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
   const totalTarget = podProjects.reduce((s, p) => s + p.monthlyTargetInternal, 0);
-  const totalAchieved = podProjects.reduce((s, p) => s + p.targetsAchieved, 0);
-  const avgCompletion = totalTarget > 0 ? Math.round((totalAchieved / totalTarget) * 100) : 0;
-  const atRisk = podProjects.filter((p) => p.monthlyTargetInternal > 0 && Math.round((p.targetsAchieved / p.monthlyTargetInternal) * 100) < 50).length;
+  const totalCompleted = podProjects.reduce((s, p) => s + (p.meetingCompleted || 0), 0);
+  const avgCompletion = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0;
+  const atRisk = podProjects.filter((p) => p.monthlyTargetInternal > 0 && Math.round(((p.meetingCompleted || 0) / p.monthlyTargetInternal) * 100) < 50).length;
 
   function getHealth(p: typeof podProjects[0]) {
     if (p.monthlyTargetInternal === 0) return { color: "bg-slate-400", label: "N/A" };
-    const pct = Math.round((p.targetsAchieved / p.monthlyTargetInternal) * 100);
+    const pct = Math.round(((p.meetingCompleted || 0) / p.monthlyTargetInternal) * 100);
     if (pct >= 75) return { color: "bg-emerald-500", label: "On Track" };
     if (pct >= 50) return { color: "bg-amber-400", label: "Needs Attention" };
     return { color: "bg-red-500", label: "At Risk" };
@@ -96,7 +96,7 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {podProjects.map((project) => {
                 const health = getHealth(project);
-                const pct = project.monthlyTargetInternal > 0 ? Math.round((project.targetsAchieved / project.monthlyTargetInternal) * 100) : 0;
+                const pct = project.monthlyTargetInternal > 0 ? Math.round(((project.meetingCompleted || 0) / project.monthlyTargetInternal) * 100) : 0;
                 const detailCount = details[project.id]?.length ?? 0;
                 const metricDays = metrics[project.id]?.reduce((s, m) => s + m.dailyMetrics.length, 0) ?? 0;
 
@@ -151,7 +151,7 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
                         </div>
                         <div>
                           <p className="text-[10px] text-slate-400 uppercase">Achieved</p>
-                          <p className="text-sm font-semibold text-slate-700 tabular-nums">{project.targetsAchieved}</p>
+                          <p className="text-sm font-semibold text-slate-700 tabular-nums">{project.meetingCompleted || 0}</p>
                         </div>
                         <div>
                           <p className="text-[10px] text-slate-400 uppercase">Ext Target</p>

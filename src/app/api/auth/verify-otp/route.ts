@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
         email: user.email,
         role: user.role,
         podId: user.podId || undefined,
+        projectId: user.projectId || undefined,
         approverId: user.approverId || "",
         avatarUrl: user.avatarUrl || undefined,
       },

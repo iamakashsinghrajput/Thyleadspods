@@ -15,10 +15,10 @@ export default function StatCards() {
 
   const totalProjects = projects.length;
   const totalTarget = projects.reduce((s, p) => s + p.monthlyTargetInternal, 0);
-  const totalAchieved = projects.reduce((s, p) => s + p.targetsAchieved, 0);
-  const avgCompletion = Math.round((totalAchieved / totalTarget) * 100);
+  const totalCompleted = projects.reduce((s, p) => s + (p.meetingCompleted || 0), 0);
+  const avgCompletion = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0;
   const atRisk = projects.filter(
-    (p) => Math.round((p.targetsAchieved / p.monthlyTargetInternal) * 100) < 50
+    (p) => p.monthlyTargetInternal > 0 && Math.round(((p.meetingCompleted || 0) / p.monthlyTargetInternal) * 100) < 50
   ).length;
 
   const cards = [
@@ -34,7 +34,7 @@ export default function StatCards() {
     {
       label: "Total Targets",
       value: totalTarget.toLocaleString(),
-      sub: `${totalAchieved.toLocaleString()} achieved`,
+      sub: `${totalCompleted.toLocaleString()} achieved`,
       icon: Target,
       accent: "text-emerald-600",
       bg: "bg-emerald-50",

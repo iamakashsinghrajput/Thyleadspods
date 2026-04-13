@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth-context";
 import LoginPage from "@/components/login-page";
 import Sidebar from "@/components/sidebar";
 import ToastBanner from "@/components/toast-banner";
+import ClientPortal from "@/components/client-portal";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, hydrated } = useAuth();
@@ -20,6 +21,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="fixed inset-0 z-50">
         <LoginPage />
+      </div>
+    );
+  }
+
+  if (user.role === "client") {
+    return (
+      <div className="fixed inset-0 z-50 overflow-auto bg-[#F8F9FA]">
+        <ClientPortal />
       </div>
     );
   }

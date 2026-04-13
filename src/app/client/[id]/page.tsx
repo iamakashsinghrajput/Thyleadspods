@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, useMemo, useRef, useCallback } from "react";
+import { use, useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Search, X, Upload, Pickaxe, Plus, Pencil, Check, Download } from "lucide-react";
 import { useData } from "@/lib/data-context";
@@ -72,7 +72,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const { projects, details, addDetail, updateDetail, deleteDetail, metrics, addMetric, updateMetric, deleteMetric } = useData();
   const { addNotification } = useNotifications();
 
-  const isPod = user?.role === "pod";
+  const isPod = user?.role === "pod" || user?.role === "superadmin";
   const contactResize = useResizableCols(contactCols.map((c) => c.w));
   const metricResize = useResizableCols(metricCols.map((c) => c.w));
   const project = projects.find((p) => p.id === id);
@@ -94,6 +94,19 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [popupRemarks, setPopupRemarks] = useState("");
   const [popupAdditionalInfo, setPopupAdditionalInfo] = useState("");
   const [popupSummary, setPopupSummary] = useState("");
+  const [clientRemarks, setClientRemarks] = useState<Record<string, { remark: string; updatedAt: string; updatedBy: string }>>({});
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/portal/meetings?projectId=${id}`);
+        const data = await res.json();
+        if (!ignore) setClientRemarks(data.remarks || {});
+      } catch {}
+    })();
+    return () => { ignore = true; };
+  }, [id]);
 
   const metricsData = metrics[id] ?? [];
   const metricsMonths = [...new Set(metricsData.map((m) => `${m.month} ${m.year}`))];
@@ -346,13 +359,18 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                       <td className="px-4 py-3 text-slate-700 overflow-hidden truncate">{r.salesRep}</td>
                       <td className="px-4 py-3 text-slate-700 overflow-hidden truncate">{r.accountManager}</td>
                       <td className="px-4 py-3 overflow-hidden">
-                        <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
-                          r.meetingStatus === "done" ? "bg-emerald-50 text-emerald-700" :
-                          r.meetingStatus === "pipeline" ? "bg-[#f0e6ff] text-indigo-700" :
-                          "bg-amber-50 text-amber-700"
-                        }`}>
-                          {r.meetingStatus === "done" ? "Done" : r.meetingStatus === "pipeline" ? "Pipeline" : "Scheduled"}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
+                            r.meetingStatus === "done" ? "bg-emerald-50 text-emerald-700" :
+                            r.meetingStatus === "pipeline" ? "bg-[#f0e6ff] text-indigo-700" :
+                            "bg-amber-50 text-amber-700"
+                          }`}>
+                            {r.meetingStatus === "done" ? "Done" : r.meetingStatus === "pipeline" ? "Pipeline" : "Scheduled"}
+                          </span>
+                          {clientRemarks[r.meetingId]?.remark && (
+                            <span className="w-2 h-2 rounded-full bg-[#6800FF] shrink-0" title="Has client remark" />
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 overflow-hidden">
                         {r.meetingLink ? <a href={r.meetingLink} target="_blank" rel="noopener noreferrer" className="text-[#6800FF] hover:text-indigo-800 text-xs font-medium">Join</a> : <span className="text-slate-300">—</span>}
@@ -561,9 +579,24 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 </div>
               )}
 
+              {clientRemarks[viewMeeting.meetingId]?.remark && (
+                <div className="border-t border-slate-100 pt-5">
+                  <div className="bg-[#6800FF]/5 rounded-xl p-4 border border-[#6800FF]/10">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[10px] font-semibold text-[#6800FF] uppercase">Client Remark</p>
+                      <p className="text-[10px] text-slate-400">
+                        {clientRemarks[viewMeeting.meetingId].updatedBy && `${clientRemarks[viewMeeting.meetingId].updatedBy} · `}
+                        {new Date(clientRemarks[viewMeeting.meetingId].updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                      </p>
+                    </div>
+                    <p className="text-sm text-slate-700 whitespace-pre-line leading-relaxed">{clientRemarks[viewMeeting.meetingId].remark}</p>
+                  </div>
+                </div>
+              )}
+
               <div className="border-t border-slate-100 pt-5 space-y-4">
                 <div>
-                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5 block">Remarks (Client)</label>
+                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5 block">Internal Remarks</label>
                   <textarea
                     value={popupRemarks}
                     onChange={(e) => setPopupRemarks(e.target.value)}

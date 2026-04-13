@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import {
   CheckCircle2,
@@ -22,9 +22,24 @@ import { useNotifications } from "@/lib/notification-context";
 
 type HealthStatus = "red" | "amber" | "green";
 
+const clientLogos: Record<string, string> = {
+  thyleads: "/clients/thyleads.png",
+  clevertapin: "/clients/clevertap.png",
+  bluedove: "/clients/bluedove.png",
+  evality: "/clients/evality.png",
+  onecap: "/clients/onecap.png",
+  mynd: "/clients/mynd.png",
+  actyv: "/clients/actyv.png",
+  zigtal: "/clients/zigtal.png",
+  vwo: "/clients/vwo.png",
+  pazo: "/clients/pazo.png",
+  venwiz: "/clients/venwiz.png",
+  infeedo: "/clients/infeedo.png",
+};
+
 function getCompletionPercent(project: ClientProject): number {
   if (project.monthlyTargetInternal === 0) return 0;
-  return Math.round((project.targetsAchieved / project.monthlyTargetInternal) * 100);
+  return Math.round(((project.meetingCompleted || 0) / project.monthlyTargetInternal) * 100);
 }
 
 function getHealthStatus(percent: number): HealthStatus {
@@ -156,6 +171,24 @@ export default function ProjectTable() {
   const { addNotification } = useNotifications();
   const [searchTerm, setSearchTerm] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [projectRemarkCounts, setProjectRemarkCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      const counts: Record<string, number> = {};
+      await Promise.all(projects.map(async (p) => {
+        try {
+          const res = await fetch(`/api/portal/meetings?projectId=${p.id}`);
+          const data = await res.json();
+          const remarks = data.remarks || {};
+          counts[p.id] = Object.values(remarks).filter((r) => (r as { remark: string }).remark).length;
+        } catch {}
+      }));
+      if (!ignore) setProjectRemarkCounts(counts);
+    })();
+    return () => { ignore = true; };
+  }, [projects]);
   const [newClient, setNewClient] = useState({ clientName: "", assignedPod: "pod1", monthlyTargetExternal: "", weeklyTargetExternal: "", monthlyTargetInternal: "" });
   const [colWidths, setColWidths] = useState<number[]>(columns.map((c) => c.defaultWidth));
   const dragRef = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
@@ -226,7 +259,7 @@ export default function ProjectTable() {
   function exportProjects() {
     const headers = ["Client ID", "Client Name", "Pod", "Monthly Target (Ext)", "Weekly Target (Ext)", "Monthly Target (Int)", "Achieved", "Completion %", "Health"];
     const rows = filteredProjects.map((p) => {
-      const pct = p.monthlyTargetInternal > 0 ? Math.round((p.targetsAchieved / p.monthlyTargetInternal) * 100) : 0;
+      const pct = p.monthlyTargetInternal > 0 ? Math.round(((p.meetingCompleted || 0) / p.monthlyTargetInternal) * 100) : 0;
       const health = pct >= 75 ? "On Track" : pct >= 50 ? "Needs Attention" : "At Risk";
       const pod = podMap[p.assignedPod]?.name || p.assignedPod;
       return [p.clientId, p.clientName, pod, String(p.monthlyTargetExternal), String(p.weeklyTargetExternal), String(p.monthlyTargetInternal), String(p.targetsAchieved), `${pct}%`, health];
@@ -362,11 +395,20 @@ export default function ProjectTable() {
                     >
                       <td className="px-6 py-4 overflow-hidden">
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-8 h-8 rounded-md bg-[#f0e6ff] border border-[#e0ccff] flex items-center justify-center text-[#6800FF] shrink-0">
-                            <Building2 size={16} />
-                          </div>
+                          {clientLogos[project.clientName.toLowerCase().replace(/[^a-z]/g, "")] ? (
+                            <img src={clientLogos[project.clientName.toLowerCase().replace(/[^a-z]/g, "")]} alt={project.clientName} className="w-8 h-8 rounded-md object-contain bg-white border border-slate-200 shrink-0" />
+                          ) : (
+                            <div className="w-8 h-8 rounded-md bg-[#f0e6ff] border border-[#e0ccff] flex items-center justify-center text-[#6800FF] shrink-0">
+                              <Building2 size={16} />
+                            </div>
+                          )}
                           <div className="min-w-0">
-                            <Link href={`/client/${project.id}`} className="font-medium text-[#6800FF] hover:text-indigo-800 truncate transition-colors block">{project.clientName}</Link>
+                            <div className="flex items-center gap-1.5">
+                              <Link href={`/client/${project.id}`} className="font-medium text-[#6800FF] hover:text-indigo-800 truncate transition-colors">{project.clientName}</Link>
+                              {(projectRemarkCounts[project.id] || 0) > 0 && (
+                                <span className="text-[9px] text-[#6800FF] bg-[#6800FF]/10 px-1.5 py-0.5 rounded-full font-semibold shrink-0">{projectRemarkCounts[project.id]} remark{projectRemarkCounts[project.id] > 1 ? "s" : ""}</span>
+                              )}
+                            </div>
                             <p className="text-[11px] text-slate-400 font-mono">{project.clientId}</p>
                           </div>
                         </div>
@@ -403,16 +445,10 @@ export default function ProjectTable() {
                       </td>
 
                       <td className="px-6 py-4 text-right overflow-hidden">
-                        <div className="tabular-nums">
-                          <span className="text-base font-semibold text-slate-900">{project.targetsAchieved}</span>
-                          <span className="text-slate-400 text-sm"> / {project.monthlyTargetInternal}</span>
-                        </div>
-                        <p className="text-[10px] text-slate-400 mt-0.5">
-                          <span className="text-emerald-500 font-medium">{project.meetingCompleted || 0}</span>
-                          {" Completed + "}
-                          <span className="text-amber-500 font-medium">{project.meetingBooked || 0}</span>
-                          {" Booked"}
-                        </p>
+                        <span className="text-base font-semibold text-slate-900 tabular-nums">{project.meetingCompleted || 0}</span>
+                        {(project.meetingBooked || 0) > 0 && (
+                          <span className="text-[10px] text-amber-500 font-medium ml-1.5">+{project.meetingBooked}</span>
+                        )}
                       </td>
 
                       <td className="px-6 py-4 overflow-hidden">

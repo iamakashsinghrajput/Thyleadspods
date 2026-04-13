@@ -16,7 +16,7 @@ export default function NotificationBell() {
 
   if (!user) return null;
 
-  const role = user.role === "superadmin" ? "admin" : user.role;
+  const role = user.role === "superadmin" || user.role === "client" ? "admin" : user.role;
   const podId = user.podId;
   const count = unreadCount(role, podId);
 
