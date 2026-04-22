@@ -35,7 +35,7 @@ const podColors = [
 
 const defaultPods: PodInfo[] = [
   { id: "pod1", name: "Pod 1", members: ["Kunal", "Rajesh"], ...podColors[0] },
-  { id: "pod2", name: "Pod 2", members: ["Mansi", "Naman"], ...podColors[1] },
+  { id: "pod2", name: "Pod 2", members: ["Manshi", "Naman"], ...podColors[1] },
   { id: "pod3", name: "Pod 3", members: ["Krishna", "Mridul"], ...podColors[2] },
   { id: "pod4", name: "Pod 4", members: ["Sandeep", "Rashi"], ...podColors[3] },
 ];

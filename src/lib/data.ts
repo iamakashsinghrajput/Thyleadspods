@@ -2,7 +2,7 @@ import { Pod, ClientProject, PodId } from "@/types";
 
 export const pods: Pod[] = [
   { id: "pod1", name: "Pod 1", members: ["Kunal", "Rajesh"] },
-  { id: "pod2", name: "Pod 2", members: ["Mansi", "Naman"] },
+  { id: "pod2", name: "Pod 2", members: ["Manshi", "Naman"] },
   { id: "pod3", name: "Pod 3", members: ["Krishna", "Mridul"] },
   { id: "pod4", name: "Pod 4", members: ["Sandeep", "Rashi"] },
 ];

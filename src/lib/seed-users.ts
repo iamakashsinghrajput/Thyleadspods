@@ -16,7 +16,7 @@ export const SEED_USERS: SeedUser[] = [
   { name: "Sales", email: "sales@thyleads.com", password: "admin123", role: "admin", approverId: "" },
   { name: "Kunal", email: "kunal@thyleads.com", password: "pod123", role: "pod", podId: "pod1", approverId: "bharath" },
   { name: "Rajesh", email: "rajesh@thyleads.com", password: "pod123", role: "pod", podId: "pod1", approverId: "bharath" },
-  { name: "Mansi", email: "mansi@thyleads.com", password: "pod123", role: "pod", podId: "pod2", approverId: "bharath" },
+  { name: "Manshi", email: "manshi@thyleads.com", password: "pod123", role: "pod", podId: "pod2", approverId: "bharath" },
   { name: "Naman", email: "naman@thyleads.com", password: "pod123", role: "pod", podId: "pod2", approverId: "bharath" },
   { name: "Krishna", email: "krishna@thyleads.com", password: "pod123", role: "pod", podId: "pod3", approverId: "bharath" },
   { name: "Mridul", email: "mridul@thyleads.com", password: "pod123", role: "pod", podId: "pod3", approverId: "bharath" },

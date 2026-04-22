@@ -12,7 +12,7 @@ export const allChatUsers: ChatUser[] = [
   { id: "sales", name: "Sales", role: "admin" },
   { id: "kunal", name: "Kunal", role: "pod", podId: "pod1" },
   { id: "rajesh", name: "Rajesh", role: "pod", podId: "pod1" },
-  { id: "mansi", name: "Mansi", role: "pod", podId: "pod2" },
+  { id: "manshi", name: "Manshi", role: "pod", podId: "pod2" },
   { id: "naman", name: "Naman", role: "pod", podId: "pod2" },
   { id: "krishna", name: "Krishna", role: "pod", podId: "pod3" },
   { id: "mridul", name: "Mridul", role: "pod", podId: "pod3" },
