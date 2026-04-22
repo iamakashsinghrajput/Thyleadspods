@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import UserModel from "@/lib/models/user";
+import { getSeedUser, reconcileRoleFromSeed } from "@/lib/seed-users";
 
 interface GooglePayload {
   sub: string;
@@ -47,14 +48,18 @@ export async function POST(req: NextRequest) {
     if (!user.avatarUrl && payload.picture) user.avatarUrl = payload.picture;
     user.verified = true;
     await user.save();
+    await reconcileRoleFromSeed(user);
   } else {
+    const seed = getSeedUser(payload.email);
     user = await UserModel.create({
       name: payload.name,
       email: payload.email.toLowerCase(),
       googleId: payload.sub,
       avatarUrl: payload.picture || "",
-      role: "pod",
-      approverId: "bharath",
+      role: seed?.role ?? "pod",
+      podId: seed?.podId ?? "",
+      projectId: seed?.projectId ?? "",
+      approverId: seed?.approverId ?? "bharath",
       verified: true,
     });
   }

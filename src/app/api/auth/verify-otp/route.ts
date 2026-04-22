@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import UserModel from "@/lib/models/user";
 import OtpModel from "@/lib/models/otp";
+import { reconcileRoleFromSeed } from "@/lib/seed-users";
 
 export async function POST(req: NextRequest) {
   await connectDB();
@@ -35,6 +36,7 @@ export async function POST(req: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
+    await reconcileRoleFromSeed(user);
     return NextResponse.json({
       message: type === "verify" ? "Email verified" : "Login verified",
       user: {
