@@ -15,6 +15,7 @@ const UserSchema = new Schema({
   calendarRefreshToken: { type: String, default: "" },
   calendarConnected: { type: Boolean, default: false },
   verified: { type: Boolean, default: false },
+  status: { type: String, enum: ["approved", "pending", "rejected"], default: "approved" },
   createdAt: { type: Date, default: Date.now },
 }, { strict: false });
 

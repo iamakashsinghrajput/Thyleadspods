@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import UserModel from "@/lib/models/user";
 import { getSeedUser, reconcileRoleFromSeed } from "@/lib/seed-users";
+import { expectedStatusForEmail, notifySuperadminOfPendingUser } from "@/lib/user-approval";
 
 interface GooglePayload {
   sub: string;
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
     await reconcileRoleFromSeed(user);
   } else {
     const seed = getSeedUser(payload.email);
+    const status = expectedStatusForEmail(payload.email);
     user = await UserModel.create({
       name: payload.name,
       email: payload.email.toLowerCase(),
@@ -61,7 +63,18 @@ export async function POST(req: NextRequest) {
       projectId: seed?.projectId ?? "",
       approverId: seed?.approverId ?? "bharath",
       verified: true,
+      status,
     });
+    if (status === "pending") {
+      await notifySuperadminOfPendingUser(payload.name, payload.email);
+    }
+  }
+
+  if (user.status === "pending") {
+    return NextResponse.json({ error: "Your account is awaiting approval from the superadmin." }, { status: 403 });
+  }
+  if (user.status === "rejected") {
+    return NextResponse.json({ error: "Your account has been rejected." }, { status: 403 });
   }
 
   return NextResponse.json({

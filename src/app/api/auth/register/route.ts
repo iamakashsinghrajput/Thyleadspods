@@ -4,6 +4,7 @@ import UserModel from "@/lib/models/user";
 import OtpModel from "@/lib/models/otp";
 import bcrypt from "bcryptjs";
 import { sendOtpEmail } from "@/lib/mailer";
+import { expectedStatusForEmail, notifySuperadminOfPendingUser } from "@/lib/user-approval";
 
 export async function POST(req: NextRequest) {
   await connectDB();
@@ -29,6 +30,8 @@ export async function POST(req: NextRequest) {
 
   const hashed = await bcrypt.hash(password, 10);
 
+  const status = expectedStatusForEmail(email);
+
   if (existing && !existing.verified) {
     existing.name = name;
     existing.password = hashed;
@@ -41,7 +44,11 @@ export async function POST(req: NextRequest) {
       role: "pod",
       approverId: "bharath",
       verified: false,
+      status,
     });
+    if (status === "pending") {
+      await notifySuperadminOfPendingUser(name, email);
+    }
   }
 
   const otp = String(Math.floor(100000 + Math.random() * 900000));

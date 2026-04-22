@@ -10,10 +10,18 @@ export async function POST() {
   let reconciled = 0;
   let skipped = 0;
 
+  let passwordsInstalled = 0;
+
   for (const u of SEED_USERS) {
     const exists = await UserModel.findOne({ email: u.email });
     if (exists) {
       const didReconcile = await reconcileRoleFromSeed(exists);
+      if (!exists.password) {
+        exists.password = await bcrypt.hash(u.password, 10);
+        exists.verified = true;
+        await exists.save();
+        passwordsInstalled++;
+      }
       if (didReconcile) reconciled++;
       else skipped++;
       continue;
@@ -32,5 +40,5 @@ export async function POST() {
     created++;
   }
 
-  return NextResponse.json({ created, reconciled, skipped });
+  return NextResponse.json({ created, reconciled, skipped, passwordsInstalled });
 }

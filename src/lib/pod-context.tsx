@@ -47,9 +47,15 @@ export function PodProvider({ children }: { children: React.ReactNode }) {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    const PODS_VERSION = "v2";
     try {
-      const raw = localStorage.getItem("thyleads_pods");
-      if (raw) setPods(JSON.parse(raw));
+      if (localStorage.getItem("thyleads_pods_version") !== PODS_VERSION) {
+        localStorage.removeItem("thyleads_pods");
+        localStorage.setItem("thyleads_pods_version", PODS_VERSION);
+      } else {
+        const raw = localStorage.getItem("thyleads_pods");
+        if (raw) setPods(JSON.parse(raw));
+      }
     } catch {}
     setLoaded(true);
   }, []);

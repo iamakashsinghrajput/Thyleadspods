@@ -27,6 +27,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Please verify your email first", needsVerification: true }, { status: 403 });
   }
 
+  if (user.status === "pending") {
+    return NextResponse.json({ error: "Your account is awaiting approval from the superadmin." }, { status: 403 });
+  }
+  if (user.status === "rejected") {
+    return NextResponse.json({ error: "Your account has been rejected." }, { status: 403 });
+  }
+
   const valid = await bcrypt.compare(password, user.password);
   if (!valid) {
     return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });

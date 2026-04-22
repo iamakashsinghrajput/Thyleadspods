@@ -148,13 +148,11 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     };
     if (editingDetailId) {
       updateDetail(id, editingDetailId, payload);
-      if (isPod) addNotification(`${podLabel} updated a contact for ${clientName} (${payload.contactName})`, "admin");
     } else {
       const uuid = crypto.randomUUID();
       const newId = `d${uuid}`;
       const meetingId = `MTG-${uuid.slice(0, 4).toUpperCase()}`;
       addDetail(id, { id: newId, meetingId, ...payload, accountManager: "", remarks: "", additionalInfo: "", meetingSummary: "" });
-      if (isPod) addNotification(`${podLabel} added a contact for ${clientName} — ${payload.contactName}`, "admin");
     }
     resetDetailForm();
   }

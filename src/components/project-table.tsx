@@ -56,9 +56,33 @@ const healthConfig: Record<HealthStatus, { bg: string; text: string; border: str
 
 function PodDropdown({ value, onChange, pods, podMap, editable = true }: { value: string; onChange: (pod: string) => void; pods: PodInfo[]; podMap: Record<string, PodInfo>; editable?: boolean }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number }>({ top: 0, left: 0, maxHeight: 320 });
   const btnRef = useRef<HTMLButtonElement>(null);
   const current = podMap[value];
+
+  const place = useCallback(() => {
+    if (!btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const spaceBelow = vh - rect.bottom - 8;
+    const spaceAbove = rect.top - 8;
+    const desired = Math.min(320, pods.length * 56 + 8);
+    const openUp = spaceBelow < desired && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(160, openUp ? spaceAbove : spaceBelow);
+    const top = openUp ? Math.max(8, rect.top - Math.min(desired, maxHeight) - 4) : rect.bottom + 4;
+    setPos({ top, left: rect.left, maxHeight });
+  }, [pods.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => place();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [open, place]);
 
   if (!editable) {
     return (
@@ -70,10 +94,7 @@ function PodDropdown({ value, onChange, pods, podMap, editable = true }: { value
   }
 
   function toggle() {
-    if (!open && btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 4, left: rect.left });
-    }
+    if (!open) place();
     setOpen(!open);
   }
 
@@ -94,8 +115,8 @@ function PodDropdown({ value, onChange, pods, podMap, editable = true }: { value
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div
-            className="fixed z-50 w-56 bg-white rounded-lg border border-slate-200 shadow-lg py-1"
-            style={{ top: pos.top, left: pos.left }}
+            className="fixed z-50 w-56 bg-white rounded-lg border border-slate-200 shadow-lg py-1 overflow-y-auto"
+            style={{ top: pos.top, left: pos.left, maxHeight: pos.maxHeight }}
           >
             {pods.map((pod) => (
               <button

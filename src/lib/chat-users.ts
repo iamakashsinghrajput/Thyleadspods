@@ -9,7 +9,7 @@ export interface ChatUser {
 export const allChatUsers: ChatUser[] = [
   { id: "akash", name: "Akash", role: "superadmin" },
   { id: "bharath", name: "Bharath", role: "admin" },
-  { id: "sales", name: "Sales", role: "admin" },
+  { id: "sales", name: "Rahul Dev", role: "admin" },
   { id: "kunal", name: "Kunal", role: "pod", podId: "pod1" },
   { id: "rajesh", name: "Rajesh", role: "pod", podId: "pod1" },
   { id: "manshi", name: "Manshi", role: "pod", podId: "pod2" },

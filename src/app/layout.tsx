@@ -41,15 +41,15 @@ export default function RootLayout({
         <AuthProvider>
           <PresenceProvider>
             <PodProvider>
-              <DataProvider>
-                <NotificationProvider>
+              <NotificationProvider>
+                <DataProvider>
                   <ChatProvider>
                     <SidebarProvider>
                       <AppShell>{children}</AppShell>
                     </SidebarProvider>
                   </ChatProvider>
-                </NotificationProvider>
-              </DataProvider>
+                </DataProvider>
+              </NotificationProvider>
             </PodProvider>
           </PresenceProvider>
         </AuthProvider>

@@ -4,6 +4,9 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import { type ClientDetail } from "./client-data";
 import { type DailyMetric, type ClientMetrics } from "./metrics-data";
 import type { ClientProject } from "./data-types";
+import { useAuth } from "./auth-context";
+import { useNotifications } from "./notification-context";
+import { usePods } from "./pod-context";
 
 export type { ClientProject };
 
@@ -30,10 +33,24 @@ const DataContext = createContext<DataContextType | null>(null);
 const REFRESH_INTERVAL_MS = 15_000;
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  const { addNotification } = useNotifications();
+  const { podMap } = usePods();
   const [projects, setProjects] = useState<ClientProject[]>([]);
   const [details, setDetails] = useState<Record<string, ClientDetail[]>>({});
   const [metrics, setMetrics] = useState<Record<string, ClientMetrics[]>>({});
   const seededRef = useRef(false);
+
+  const isPod = user?.role === "pod";
+  const actor = user?.name || "A pod member";
+  const podLabel = (user?.podId && podMap[user.podId]?.name) || "";
+  const notifyAdmins = useCallback((message: string) => {
+    if (!isPod) return;
+    addNotification(message, "admin");
+  }, [isPod, addNotification]);
+  const projectName = useCallback((projectId: string) => {
+    return projects.find((p) => p.id === projectId)?.clientName || projectId;
+  }, [projects]);
 
   const fetchAll = useCallback(async () => {
     const [pRes, dRes, mRes] = await Promise.all([
@@ -81,6 +98,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     };
   }, [fetchAll]);
 
+  function podPrefix() {
+    return podLabel ? `${podLabel} (${actor})` : actor;
+  }
+
   function addProject(project: ClientProject) {
     setProjects((prev) => [...prev, project]);
     void fetch("/api/projects", {
@@ -88,6 +109,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(project),
     }).then(() => fetchAll());
+    notifyAdmins(`${podPrefix()} added a new client "${project.clientName}"`);
   }
 
   function updateProject(id: string, data: Partial<ClientProject>) {
@@ -97,6 +119,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, data }),
     });
+    notifyAdmins(`${podPrefix()} updated targets for ${projectName(id)}`);
   }
 
   function addDetail(projectId: string, detail: ClientDetail) {
@@ -106,6 +129,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ projectId, detail }),
     });
+    const contact = detail.contactName || detail.companyName || "a new contact";
+    notifyAdmins(`${podPrefix()} added ${contact} to ${projectName(projectId)}`);
   }
 
   function updateDetail(projectId: string, detailId: string, data: Partial<ClientDetail>) {
@@ -118,9 +143,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ projectId, detailId, data }),
     });
+    const contact = data.contactName || details[projectId]?.find((d) => d.id === detailId)?.contactName || "a contact";
+    notifyAdmins(`${podPrefix()} updated ${contact} for ${projectName(projectId)}`);
   }
 
   function deleteDetail(projectId: string, detailId: string) {
+    const existing = details[projectId]?.find((d) => d.id === detailId);
     setDetails((prev) => ({
       ...prev,
       [projectId]: (prev[projectId] ?? []).filter((d) => d.id !== detailId),
@@ -128,6 +156,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     void fetch(`/api/details?projectId=${encodeURIComponent(projectId)}&detailId=${encodeURIComponent(detailId)}`, {
       method: "DELETE",
     });
+    notifyAdmins(`${podPrefix()} deleted ${existing?.contactName || "a contact"} from ${projectName(projectId)}`);
   }
 
   function addMetric(projectId: string, date: string, month: string, year: number, leads: number, accounts: number) {
@@ -154,6 +183,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ projectId, date, month, year, leads, accounts }),
     });
+    notifyAdmins(`${podPrefix()} logged ${leads} leads / ${accounts} accounts on ${date} for ${projectName(projectId)}`);
   }
 
   function updateMetric(projectId: string, month: string, year: number, date: string, data: Partial<DailyMetric>) {
@@ -170,6 +200,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ projectId, month, year, date, data }),
     });
+    notifyAdmins(`${podPrefix()} edited metrics for ${date} on ${projectName(projectId)}`);
   }
 
   function deleteMetric(projectId: string, month: string, year: number, date: string) {
@@ -183,6 +214,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }));
     const qs = new URLSearchParams({ projectId, month, year: String(year), date });
     void fetch(`/api/metrics?${qs.toString()}`, { method: "DELETE" });
+    notifyAdmins(`${podPrefix()} deleted metrics for ${date} on ${projectName(projectId)}`);
   }
 
   return (

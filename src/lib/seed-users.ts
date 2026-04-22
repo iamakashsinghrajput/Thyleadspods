@@ -13,7 +13,7 @@ export interface SeedUser {
 export const SEED_USERS: SeedUser[] = [
   { name: "Akash", email: "akash@thyleads.com", password: "superadmin123", role: "superadmin", approverId: "sales" },
   { name: "Bharath", email: "bharath@thyleads.com", password: "admin123", role: "admin", approverId: "sales" },
-  { name: "Sales", email: "sales@thyleads.com", password: "admin123", role: "admin", approverId: "" },
+  { name: "Rahul Dev", email: "sales@thyleads.com", password: "admin123", role: "admin", approverId: "" },
   { name: "Kunal", email: "kunal@thyleads.com", password: "pod123", role: "pod", podId: "pod1", approverId: "bharath" },
   { name: "Rajesh", email: "rajesh@thyleads.com", password: "pod123", role: "pod", podId: "pod1", approverId: "bharath" },
   { name: "Manshi", email: "manshi@thyleads.com", password: "pod123", role: "pod", podId: "pod2", approverId: "bharath" },
@@ -44,10 +44,12 @@ export function getSeedUser(email: string): SeedUser | undefined {
 
 interface ReconcilableUser {
   email: string;
+  name: string;
   role: SeedRole | string;
   podId?: string;
   projectId?: string;
   approverId?: string;
+  status?: string;
   save: () => Promise<unknown>;
 }
 
@@ -58,15 +60,19 @@ export async function reconcileRoleFromSeed(user: ReconcilableUser): Promise<boo
   const expectedProjectId = spec.projectId || "";
   const expectedApproverId = spec.approverId || "";
   const drifted =
+    user.name !== spec.name ||
     user.role !== spec.role ||
     (user.podId || "") !== expectedPodId ||
     (user.projectId || "") !== expectedProjectId ||
-    (user.approverId || "") !== expectedApproverId;
+    (user.approverId || "") !== expectedApproverId ||
+    (user.status || "approved") !== "approved";
   if (!drifted) return false;
+  user.name = spec.name;
   user.role = spec.role;
   user.podId = expectedPodId;
   user.projectId = expectedProjectId;
   user.approverId = expectedApproverId;
+  user.status = "approved";
   await user.save();
   return true;
 }

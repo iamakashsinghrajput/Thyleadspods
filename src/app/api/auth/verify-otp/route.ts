@@ -37,6 +37,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
     await reconcileRoleFromSeed(user);
+    if (user.status === "pending") {
+      return NextResponse.json({ error: "Your account is awaiting approval from the superadmin." }, { status: 403 });
+    }
+    if (user.status === "rejected") {
+      return NextResponse.json({ error: "Your account has been rejected." }, { status: 403 });
+    }
     return NextResponse.json({
       message: type === "verify" ? "Email verified" : "Login verified",
       user: {
