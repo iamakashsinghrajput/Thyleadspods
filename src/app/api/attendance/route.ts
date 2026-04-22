@@ -2,6 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import Attendance from "@/lib/models/attendance";
 
+const IST_TZ = "Asia/Kolkata";
+const IST_OFFSET = "+05:30";
+
+function istNow() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: IST_TZ,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(now);
+  const m: Record<string, string> = {};
+  for (const p of parts) if (p.type !== "literal") m[p.type] = p.value;
+  return {
+    date: `${m.year}-${m.month}-${m.day}`,
+    time: `${m.hour}:${m.minute}`,
+    epochMs: now.getTime(),
+  };
+}
+
 export async function GET(req: NextRequest) {
   await connectDB();
   const userId = req.nextUrl.searchParams.get("userId");
@@ -37,11 +56,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   await connectDB();
   const { userId, userName, action } = await req.json();
-  const now = new Date();
-  const date = now.toISOString().split("T")[0];
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mm = String(now.getMinutes()).padStart(2, "0");
-  const time = `${hh}:${mm}`;
+  const { date, time, epochMs: nowMs } = istNow();
 
   if (action === "punchIn") {
     const existing = await Attendance.findOne({ userId, date });
@@ -79,9 +94,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Already punched out" }, { status: 400 });
     }
 
-    const inTime = new Date(`${date}T${record.punchIn}:00`);
-    const outTime = now;
-    const sessionMinutes = Math.max(0, Math.round((outTime.getTime() - inTime.getTime()) / 60000));
+    const inTimeMs = new Date(`${date}T${record.punchIn}:00${IST_OFFSET}`).getTime();
+    const sessionMinutes = Math.max(0, Math.round((nowMs - inTimeMs) / 60000));
     const totalMinutes = (record.prevMinutes || 0) + sessionMinutes;
     const status = totalMinutes >= 240 ? "present" : "half-day";
 

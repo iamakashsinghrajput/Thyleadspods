@@ -118,13 +118,31 @@ const HOLIDAYS = [
   { date: "2026-12-25", day: "Friday", name: "Christmas" },
 ];
 
+const IST_TZ = "Asia/Kolkata";
+const IST_OFFSET = "+05:30";
+
+function istParts(d: Date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: IST_TZ,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(d);
+  const m: Record<string, string> = {};
+  for (const p of parts) if (p.type !== "literal") m[p.type] = p.value;
+  return {
+    date: `${m.year}-${m.month}-${m.day}`,
+    hour: Number(m.hour),
+    minute: Number(m.minute),
+  };
+}
+
 function getNextHoliday() {
-  const today = new Date().toISOString().split("T")[0];
+  const today = istParts().date;
   return HOLIDAYS.find((h) => h.date >= today) || HOLIDAYS[0];
 }
 
 function getGreeting() {
-  const h = new Date().getHours();
+  const h = istParts().hour;
   if (h < 12) return "Good Morning";
   if (h < 17) return "Good Afternoon";
   return "Good Evening";
@@ -176,10 +194,11 @@ export default function AttendancePage() {
   const [showMeetingsPopup, setShowMeetingsPopup] = useState(false);
   const [calendarConnecting, setCalendarConnecting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [sessionStartAt, setSessionStartAt] = useState<{ date: string; punchIn: string; at: number } | null>(null);
 
   const nextHoliday = getNextHoliday();
   const userId = user ? getUserId(user.name) : "";
-  const todayDate = new Date().toISOString().split("T")[0];
+  const todayDate = istParts(new Date(now)).date;
 
   const fetchToday = useCallback(async () => {
     if (!userId) return;
@@ -226,11 +245,16 @@ export default function AttendancePage() {
     if (!user) return;
     setLoading(true);
     try {
-      await fetch("/api/attendance", {
+      const res = await fetch("/api/attendance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId, userName: user.name, action }),
       });
+      const data = await res.json();
+      if (action === "punchIn" && data?.record?.punchIn) {
+        setSessionStartAt({ date: data.record.date, punchIn: data.record.punchIn, at: Date.now() });
+      }
+      if (action === "punchOut") setSessionStartAt(null);
       await fetchToday();
       await fetchMonth();
     } catch {}
@@ -419,12 +443,17 @@ export default function AttendancePage() {
   const isPunchedIn = !!(today?.punchIn && !today?.punchOut);
   const isPunchedOut = !!(today?.punchIn && today?.punchOut);
 
-  const currentHour = new Date().getHours();
-  const currentMin = new Date().getMinutes();
+  const { hour: currentHour, minute: currentMin } = istParts(new Date(now));
   const currentTimeMin = currentHour * 60 + currentMin;
   const punchAllowedFrom = 9 * 60 + 30;
-  const punchAllowedUntil = 19 * 60;
+  const punchAllowedUntil = 23 * 60 + 59;
   const isPunchTimeAllowed = currentTimeMin >= punchAllowedFrom && currentTimeMin <= punchAllowedUntil;
+
+  const isMissedPunchOut = (r: AttendanceRecord) =>
+    !!(r.punchIn && !r.punchOut && r.date !== todayDate && r.date < todayDate);
+  const missedPunchOutDays = monthRecords.filter(isMissedPunchOut);
+  const missedPunchOut = missedPunchOutDays[0] ?? null;
+  const missedDateSet = new Set(missedPunchOutDays.map((r) => r.date));
 
   function to12h(t: string) {
     if (!t || t.includes("AM") || t.includes("PM")) return t;
@@ -437,7 +466,13 @@ export default function AttendancePage() {
   const elapsedSeconds = (() => {
     void tick;
     if (!today?.punchIn || today?.punchOut) return (today?.totalMinutes || 0) * 60;
-    const inTime = new Date(`${todayDate}T${today.punchIn}:00`).getTime();
+    const localAnchor =
+      sessionStartAt &&
+      sessionStartAt.date === today.date &&
+      sessionStartAt.punchIn === today.punchIn
+        ? sessionStartAt.at
+        : null;
+    const inTime = localAnchor ?? new Date(`${todayDate}T${today.punchIn}:00${IST_OFFSET}`).getTime();
     if (isNaN(inTime)) return 0;
     const currentSession = Math.max(0, Math.floor((now - inTime) / 1000));
     const prevSecs = (today.prevMinutes || 0) * 60;
@@ -521,12 +556,12 @@ export default function AttendancePage() {
             </div>
           ) : !isPunchTimeAllowed && !isPunchedIn ? (
             <div className="w-full py-4 bg-slate-100 text-slate-400 font-semibold text-sm rounded-full text-center">
-              Punch available 9:30 AM – 7:00 PM
+              Punch available 9:30 AM – 11:59 PM
             </div>
           ) : (
             <button
               onClick={() => handlePunch(isPunchedIn ? "punchOut" : "punchIn")}
-              disabled={loading}
+              disabled={loading || (!isPunchedIn && !isPunchTimeAllowed)}
               className="w-full py-4 bg-[#6800FF] hover:bg-[#5800DD] disabled:bg-slate-300 text-white font-semibold text-lg rounded-full transition-all shadow-[0_8px_20px_-6px_rgba(249,115,22,0.5)] mt-auto"
             >
               {loading ? "Processing..." : isPunchedIn ? "Punch out" : "Punch in"}
@@ -579,7 +614,7 @@ export default function AttendancePage() {
             </div>
             <div className="pt-3 mt-2 border-t border-slate-100 grid grid-cols-3 gap-2 text-center">
               <div>
-                <p className="text-lg font-bold text-emerald-600 tabular-nums">{monthRecords.filter((r) => r.status === "present").length}</p>
+                <p className="text-lg font-bold text-emerald-600 tabular-nums">{monthRecords.filter((r) => r.status === "present" && !isMissedPunchOut(r)).length}</p>
                 <p className="text-[10px] text-slate-400 uppercase font-semibold">Present</p>
               </div>
               <div>
@@ -635,6 +670,7 @@ export default function AttendancePage() {
                   if (day === null) return <div key={`e-${i}`} />;
                   const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
                   const hasRecord = attendanceDates.has(dateStr);
+                  const isMissed = missedDateSet.has(dateStr);
                   const isToday = day === todayNum;
                   const isPast = !isToday && dateStr < todayDate && !hasRecord;
                   const regReq = regRequests.find((r) => r.date === dateStr);
@@ -645,6 +681,7 @@ export default function AttendancePage() {
                         className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-semibold transition-all ${
                           selectedDay === dateStr ? "ring-2 ring-[#6800FF] ring-offset-1" :
                           isToday ? "bg-[#6800FF] text-white shadow-sm" :
+                          isMissed ? "bg-red-100 text-red-700 border border-red-300" :
                           hasRecord ? "border border-[#09090b] text-slate-900" :
                           regReq?.status === "pending" ? "bg-amber-100 text-amber-700" :
                           isPast ? "text-red-300" :
@@ -809,6 +846,7 @@ export default function AttendancePage() {
                       if (day === null) return <div key={`e-${i}`} />;
                       const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
                       const hasRecord = attendanceDates.has(dateStr);
+                      const isMissed = missedDateSet.has(dateStr);
                       const isToday = day === todayNum;
                       const isPast = !isToday && dateStr < todayDate && !hasRecord;
                       const regReq = regRequests.find((r) => r.date === dateStr);
@@ -820,6 +858,7 @@ export default function AttendancePage() {
                             className={`w-10 h-10 flex items-center justify-center rounded-xl text-sm font-semibold transition-all ${
                               isSelected ? "bg-[#6800FF] text-white shadow-lg shadow-[#6800FF]/20" :
                               isToday ? "bg-slate-900 text-white" :
+                              isMissed ? "bg-red-100 text-red-700 border border-red-200 hover:bg-red-200" :
                               hasRecord ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" :
                               regReq?.status === "pending" ? "bg-amber-50 text-amber-600 hover:bg-amber-100" :
                               regReq?.status === "approved" ? "bg-emerald-50 text-emerald-600" :
@@ -831,9 +870,10 @@ export default function AttendancePage() {
                       );
                     })}
                   </div>
-                  <div className="flex items-center gap-4 mt-4 text-xs text-slate-400">
+                  <div className="flex flex-wrap items-center gap-3 mt-4 text-xs text-slate-400">
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-slate-900" /> Today</div>
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-emerald-50 border border-emerald-200" /> Present</div>
+                    <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-red-100 border border-red-200" /> Error</div>
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-red-50 border border-red-200" /> Absent</div>
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-amber-50 border border-amber-200" /> Pending</div>
                   </div>
@@ -857,24 +897,42 @@ export default function AttendancePage() {
                           <p className="text-xs font-mono text-slate-400">{selectedDay}</p>
                         </div>
 
-                        {dayRecord && (
-                          <div className="bg-slate-50 rounded-xl p-4 space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${dayRecord.status === "present" ? "bg-emerald-100 text-emerald-700" : dayRecord.status === "half-day" ? "bg-amber-100 text-amber-700" : dayRecord.status === "leave" ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-500"}`}>{dayRecord.status}</span>
-                              <span className="text-sm font-semibold text-slate-700">{Math.floor(dayRecord.totalMinutes / 60)}h {dayRecord.totalMinutes % 60}m</span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="bg-white rounded-lg p-3 border border-slate-100">
-                                <p className="text-[10px] font-semibold text-slate-400 uppercase">Punch In</p>
-                                <p className="text-base font-bold text-slate-800 tabular-nums">{dayRecord.punchIn ? to12h(dayRecord.punchIn) : "--"}</p>
+                        {dayRecord && (() => {
+                          const missed = isMissedPunchOut(dayRecord);
+                          const badgeClass = missed
+                            ? "bg-red-100 text-red-700"
+                            : dayRecord.status === "present" ? "bg-emerald-100 text-emerald-700"
+                            : dayRecord.status === "half-day" ? "bg-amber-100 text-amber-700"
+                            : dayRecord.status === "leave" ? "bg-red-100 text-red-600"
+                            : "bg-slate-100 text-slate-500";
+                          const badgeLabel = missed ? "error" : dayRecord.status;
+                          return (
+                            <div className={`rounded-xl p-4 space-y-2 ${missed ? "bg-red-50 border border-red-100" : "bg-slate-50"}`}>
+                              <div className="flex items-center justify-between">
+                                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${badgeClass}`}>{badgeLabel}</span>
+                                <span className="text-sm font-semibold text-slate-700">{missed ? "missed punch out" : `${Math.floor(dayRecord.totalMinutes / 60)}h ${dayRecord.totalMinutes % 60}m`}</span>
                               </div>
-                              <div className="bg-white rounded-lg p-3 border border-slate-100">
-                                <p className="text-[10px] font-semibold text-slate-400 uppercase">Punch Out</p>
-                                <p className="text-base font-bold text-slate-800 tabular-nums">{dayRecord.punchOut ? to12h(dayRecord.punchOut) : "--"}</p>
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="bg-white rounded-lg p-3 border border-slate-100">
+                                  <p className="text-[10px] font-semibold text-slate-400 uppercase">Punch In</p>
+                                  <p className="text-base font-bold text-slate-800 tabular-nums">{dayRecord.punchIn ? to12h(dayRecord.punchIn) : "--"}</p>
+                                </div>
+                                <div className="bg-white rounded-lg p-3 border border-slate-100">
+                                  <p className="text-[10px] font-semibold text-slate-400 uppercase">Punch Out</p>
+                                  <p className={`text-base font-bold tabular-nums ${missed ? "text-red-600" : "text-slate-800"}`}>{dayRecord.punchOut ? to12h(dayRecord.punchOut) : missed ? "missing" : "--"}</p>
+                                </div>
                               </div>
+                              {missed && !dayReg && !showRegForm && (
+                                <button
+                                  onClick={() => { setShowRegForm(true); setRegForm({ punchIn: dayRecord.punchIn || "", punchOut: "", reason: "" }); }}
+                                  className="w-full mt-2 py-2.5 bg-[#6800FF] hover:bg-[#5800DD] text-white font-semibold text-sm rounded-lg transition-colors flex items-center justify-center gap-2"
+                                >
+                                  <FileText size={14} /> Regularize Attendance
+                                </button>
+                              )}
                             </div>
-                          </div>
-                        )}
+                          );
+                        })()}
 
                         {dayReg && (
                           <div className={`rounded-xl p-4 space-y-2 ${dayReg.status === "pending" ? "bg-amber-50 border border-amber-100" : dayReg.status === "approved" ? "bg-emerald-50 border border-emerald-100" : "bg-red-50 border border-red-100"}`}>
@@ -893,13 +951,13 @@ export default function AttendancePage() {
                           </div>
                         )}
 
-                        {!dayRecord && !dayReg && (
+                        {(!dayReg && (!dayRecord || isMissedPunchOut(dayRecord))) && (
                           <>
-                            {!showRegForm ? (
+                            {!showRegForm && !dayRecord ? (
                               <button onClick={() => setShowRegForm(true)} className="w-full py-3 bg-[#6800FF] hover:bg-[#5800DD] text-white font-semibold rounded-xl transition-colors flex items-center justify-center gap-2">
                                 <FileText size={16} /> Regularize Attendance
                               </button>
-                            ) : (
+                            ) : showRegForm ? (
                               <div className="bg-slate-50 rounded-xl p-4 space-y-3">
                                 <p className="text-sm font-semibold text-slate-700">Submit Regularize Request</p>
                                 <div className="grid grid-cols-2 gap-3">
@@ -923,7 +981,7 @@ export default function AttendancePage() {
                                   <button onClick={() => { setShowRegForm(false); setRegForm({ punchIn: "", punchOut: "", reason: "" }); }} className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded-xl transition-colors">Cancel</button>
                                 </div>
                               </div>
-                            )}
+                            ) : null}
                           </>
                         )}
                       </div>

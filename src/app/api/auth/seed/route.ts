@@ -32,11 +32,32 @@ const SEED_USERS = [
 export async function POST() {
   await connectDB();
   let created = 0;
+  let reconciled = 0;
   let skipped = 0;
 
   for (const u of SEED_USERS) {
     const exists = await UserModel.findOne({ email: u.email });
-    if (exists) { skipped++; continue; }
+    if (exists) {
+      const expectedPodId = u.podId || "";
+      const expectedProjectId = u.projectId || "";
+      const expectedApproverId = u.approverId || "";
+      const drifted =
+        exists.role !== u.role ||
+        (exists.podId || "") !== expectedPodId ||
+        (exists.projectId || "") !== expectedProjectId ||
+        (exists.approverId || "") !== expectedApproverId;
+      if (drifted) {
+        exists.role = u.role as "superadmin" | "admin" | "pod" | "client";
+        exists.podId = expectedPodId;
+        exists.projectId = expectedProjectId;
+        exists.approverId = expectedApproverId;
+        await exists.save();
+        reconciled++;
+      } else {
+        skipped++;
+      }
+      continue;
+    }
     const hashed = await bcrypt.hash(u.password, 10);
     await UserModel.create({
       name: u.name,
@@ -51,5 +72,5 @@ export async function POST() {
     created++;
   }
 
-  return NextResponse.json({ created, skipped });
+  return NextResponse.json({ created, reconciled, skipped });
 }
