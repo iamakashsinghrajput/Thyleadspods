@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { usePods } from "@/lib/pod-context";
+import { useData } from "@/lib/data-context";
 import ProjectTable from "@/components/project-table";
 import DashboardHeader from "@/components/dashboard-header";
 import StatCards from "@/components/stat-cards";
@@ -12,7 +13,19 @@ import { Eye } from "lucide-react";
 export default function Dashboard() {
   const { user } = useAuth();
   const { pods } = usePods();
+  const { details } = useData();
   const [viewAsPod, setViewAsPod] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState("all");
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    Object.values(details).forEach((list) =>
+      list.forEach((d) => years.add(d.year))
+    );
+    if (years.size === 0) years.add(new Date().getFullYear());
+    return Array.from(years).sort((a, b) => b - a);
+  }, [details]);
 
   if (!user) return null;
 
@@ -46,7 +59,12 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-full">
-      <DashboardHeader />
+      <DashboardHeader
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+        onFilterChange={(month, year) => { setSelectedMonth(month); setSelectedYear(year); }}
+        availableYears={availableYears}
+      />
       <div className="px-8 pb-8 space-y-6">
         {user.role === "superadmin" && (
           <div className="flex items-center gap-2">
@@ -62,8 +80,8 @@ export default function Dashboard() {
             ))}
           </div>
         )}
-        <StatCards />
-        <ProjectTable />
+        <StatCards selectedMonth={selectedMonth} selectedYear={selectedYear} />
+        <ProjectTable selectedMonth={selectedMonth} selectedYear={selectedYear} />
       </div>
     </div>
   );

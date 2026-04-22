@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import {
   Users,
   Target,
@@ -9,17 +10,38 @@ import {
 import { usePods } from "@/lib/pod-context";
 import { useData } from "@/lib/data-context";
 
-export default function StatCards() {
+interface StatCardsProps {
+  selectedMonth: string;
+  selectedYear: number;
+}
+
+export default function StatCards({ selectedMonth, selectedYear }: StatCardsProps) {
   const { pods } = usePods();
-  const { projects } = useData();
+  const { projects, details } = useData();
+
+  const projectStats = useMemo(() => {
+    if (selectedMonth === "all") return null;
+    const stats: Record<string, { completed: number; booked: number }> = {};
+    for (const [projectId, list] of Object.entries(details)) {
+      const filtered = list.filter((d) => d.month === selectedMonth && d.year === selectedYear);
+      stats[projectId] = {
+        completed: filtered.filter((d) => d.meetingStatus === "done").length,
+        booked: filtered.filter((d) => d.meetingStatus === "scheduled").length,
+      };
+    }
+    return stats;
+  }, [details, selectedMonth, selectedYear]);
 
   const totalProjects = projects.length;
   const totalTarget = projects.reduce((s, p) => s + p.monthlyTargetInternal, 0);
-  const totalCompleted = projects.reduce((s, p) => s + (p.meetingCompleted || 0), 0);
+  const totalCompleted = projectStats
+    ? projects.reduce((s, p) => s + (projectStats[p.id]?.completed || 0), 0)
+    : projects.reduce((s, p) => s + (p.meetingCompleted || 0), 0);
   const avgCompletion = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0;
-  const atRisk = projects.filter(
-    (p) => p.monthlyTargetInternal > 0 && Math.round(((p.meetingCompleted || 0) / p.monthlyTargetInternal) * 100) < 50
-  ).length;
+  const atRisk = projects.filter((p) => {
+    const completed = projectStats ? (projectStats[p.id]?.completed || 0) : (p.meetingCompleted || 0);
+    return p.monthlyTargetInternal > 0 && Math.round((completed / p.monthlyTargetInternal) * 100) < 50;
+  }).length;
 
   const cards = [
     {

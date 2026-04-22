@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
 import {
   CheckCircle2,
@@ -163,15 +163,43 @@ function EditableTargetCell({ value, editable, onSave }: { value: number; editab
   );
 }
 
-export default function ProjectTable() {
+interface ProjectTableProps {
+  selectedMonth: string;
+  selectedYear: number;
+}
+
+export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTableProps) {
   const { pods, podMap } = usePods();
-  const { projects, addProject, updateProject } = useData();
+  const { projects, addProject, updateProject, details } = useData();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "superadmin";
   const { addNotification } = useNotifications();
   const [searchTerm, setSearchTerm] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
   const [projectRemarkCounts, setProjectRemarkCounts] = useState<Record<string, number>>({});
+
+  const projectStats = useMemo(() => {
+    if (selectedMonth === "all") return null;
+    const stats: Record<string, { completed: number; booked: number }> = {};
+    for (const [projectId, list] of Object.entries(details)) {
+      const filtered = list.filter((d) => d.month === selectedMonth && d.year === selectedYear);
+      stats[projectId] = {
+        completed: filtered.filter((d) => d.meetingStatus === "done").length,
+        booked: filtered.filter((d) => d.meetingStatus === "scheduled").length,
+      };
+    }
+    return stats;
+  }, [details, selectedMonth, selectedYear]);
+
+  function getFilteredCompleted(project: ClientProject): number {
+    if (!projectStats) return project.meetingCompleted || 0;
+    return projectStats[project.id]?.completed || 0;
+  }
+
+  function getFilteredBooked(project: ClientProject): number {
+    if (!projectStats) return project.meetingBooked || 0;
+    return projectStats[project.id]?.booked || 0;
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -259,10 +287,13 @@ export default function ProjectTable() {
   function exportProjects() {
     const headers = ["Client ID", "Client Name", "Pod", "Monthly Target (Ext)", "Weekly Target (Ext)", "Monthly Target (Int)", "Achieved", "Completion %", "Health"];
     const rows = filteredProjects.map((p) => {
-      const pct = p.monthlyTargetInternal > 0 ? Math.round(((p.meetingCompleted || 0) / p.monthlyTargetInternal) * 100) : 0;
+      const completed = getFilteredCompleted(p);
+      const booked = getFilteredBooked(p);
+      const achieved = completed + booked;
+      const pct = p.monthlyTargetInternal > 0 ? Math.round((completed / p.monthlyTargetInternal) * 100) : 0;
       const health = pct >= 75 ? "On Track" : pct >= 50 ? "Needs Attention" : "At Risk";
       const pod = podMap[p.assignedPod]?.name || p.assignedPod;
-      return [p.clientId, p.clientName, pod, String(p.monthlyTargetExternal), String(p.weeklyTargetExternal), String(p.monthlyTargetInternal), String(p.targetsAchieved), `${pct}%`, health];
+      return [p.clientId, p.clientName, pod, String(p.monthlyTargetExternal), String(p.weeklyTargetExternal), String(p.monthlyTargetInternal), String(achieved), `${pct}%`, health];
     });
     const csv = [headers.join(","), ...rows.map((r) => r.map((v) => v.includes(",") ? `"${v}"` : v).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -384,7 +415,9 @@ export default function ProjectTable() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filteredProjects.map((project) => {
-                  const percent = getCompletionPercent(project);
+                  const completed = getFilteredCompleted(project);
+                  const booked = getFilteredBooked(project);
+                  const percent = project.monthlyTargetInternal === 0 ? 0 : Math.round((completed / project.monthlyTargetInternal) * 100);
                   const health = getHealthStatus(percent);
                   const hc = healthConfig[health];
                   const StatusIcon = hc.icon;
@@ -445,9 +478,9 @@ export default function ProjectTable() {
                       </td>
 
                       <td className="px-6 py-4 text-right overflow-hidden">
-                        <span className="text-base font-semibold text-slate-900 tabular-nums">{project.meetingCompleted || 0}</span>
-                        {(project.meetingBooked || 0) > 0 && (
-                          <span className="text-[10px] text-amber-500 font-medium ml-1.5">+{project.meetingBooked}</span>
+                        <span className="text-base font-semibold text-slate-900 tabular-nums">{completed}</span>
+                        {booked > 0 && (
+                          <span className="text-[10px] text-amber-500 font-medium ml-1.5">+{booked}</span>
                         )}
                       </td>
 

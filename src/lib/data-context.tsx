@@ -1,37 +1,11 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { clientDetails as initialClientDetails, type ClientDetail } from "./client-data";
-import { clientMetrics as initialClientMetrics, type DailyMetric, type ClientMetrics } from "./metrics-data";
-import { useCrossTabSync } from "./use-sync";
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { type ClientDetail } from "./client-data";
+import { type DailyMetric, type ClientMetrics } from "./metrics-data";
+import type { ClientProject } from "./data-types";
 
-export interface ClientProject {
-  id: string;
-  clientId: string;
-  clientName: string;
-  assignedPod: string;
-  monthlyTargetExternal: number;
-  weeklyTargetExternal: number;
-  monthlyTargetInternal: number;
-  targetsAchieved: number;
-  meetingCompleted: number;
-  meetingBooked: number;
-}
-
-const defaultProjects: ClientProject[] = [
-  { id: "p1", clientId: "CLT-1001", clientName: "Thyleads", assignedPod: "pod4", monthlyTargetExternal: 20, weeklyTargetExternal: 5, monthlyTargetInternal: 20, targetsAchieved: 5, meetingCompleted: 4, meetingBooked: 1 },
-  { id: "p2", clientId: "CLT-1002", clientName: "Clevertap- In", assignedPod: "pod2", monthlyTargetExternal: 40, weeklyTargetExternal: 8, monthlyTargetInternal: 40, targetsAchieved: 9, meetingCompleted: 3, meetingBooked: 6 },
-  { id: "p3", clientId: "CLT-1003", clientName: "BlueDove", assignedPod: "pod2", monthlyTargetExternal: 3, weeklyTargetExternal: 1, monthlyTargetInternal: 3, targetsAchieved: 1, meetingCompleted: 0, meetingBooked: 1 },
-  { id: "p4", clientId: "CLT-1004", clientName: "Evality", assignedPod: "pod2", monthlyTargetExternal: 15, weeklyTargetExternal: 3, monthlyTargetInternal: 15, targetsAchieved: 0, meetingCompleted: 0, meetingBooked: 0 },
-  { id: "p5", clientId: "CLT-1005", clientName: "Onecap", assignedPod: "pod3", monthlyTargetExternal: 8, weeklyTargetExternal: 3, monthlyTargetInternal: 8, targetsAchieved: 2, meetingCompleted: 0, meetingBooked: 2 },
-  { id: "p6", clientId: "CLT-1006", clientName: "Mynd", assignedPod: "pod3", monthlyTargetExternal: 8, weeklyTargetExternal: 3, monthlyTargetInternal: 8, targetsAchieved: 2, meetingCompleted: 1, meetingBooked: 1 },
-  { id: "p7", clientId: "CLT-1007", clientName: "Actyv", assignedPod: "pod3", monthlyTargetExternal: 8, weeklyTargetExternal: 3, monthlyTargetInternal: 8, targetsAchieved: 2, meetingCompleted: 0, meetingBooked: 2 },
-  { id: "p8", clientId: "CLT-1008", clientName: "Zigtal", assignedPod: "pod3", monthlyTargetExternal: 8, weeklyTargetExternal: 3, monthlyTargetInternal: 8, targetsAchieved: 4, meetingCompleted: 1, meetingBooked: 3 },
-  { id: "p9", clientId: "CLT-1009", clientName: "VWO", assignedPod: "pod1", monthlyTargetExternal: 12, weeklyTargetExternal: 6, monthlyTargetInternal: 12, targetsAchieved: 0, meetingCompleted: 0, meetingBooked: 0 },
-  { id: "p10", clientId: "CLT-1010", clientName: "Pazo", assignedPod: "pod1", monthlyTargetExternal: 8, weeklyTargetExternal: 2, monthlyTargetInternal: 8, targetsAchieved: 6, meetingCompleted: 3, meetingBooked: 3 },
-  { id: "p11", clientId: "CLT-1011", clientName: "Venwiz", assignedPod: "pod1", monthlyTargetExternal: 5, weeklyTargetExternal: 5, monthlyTargetInternal: 5, targetsAchieved: 2, meetingCompleted: 1, meetingBooked: 1 },
-  { id: "p12", clientId: "CLT-1012", clientName: "InFeedo", assignedPod: "pod1", monthlyTargetExternal: 10, weeklyTargetExternal: 3, monthlyTargetInternal: 10, targetsAchieved: 0, meetingCompleted: 0, meetingBooked: 0 },
-];
+export type { ClientProject };
 
 interface DataContextType {
   projects: ClientProject[];
@@ -47,60 +21,91 @@ interface DataContextType {
   addMetric: (projectId: string, date: string, month: string, year: number, leads: number, accounts: number) => void;
   updateMetric: (projectId: string, month: string, year: number, date: string, data: Partial<DailyMetric>) => void;
   deleteMetric: (projectId: string, month: string, year: number, date: string) => void;
+
+  refresh: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextType | null>(null);
 
-export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [projects, setProjects] = useState<ClientProject[]>(defaultProjects);
-  const [details, setDetails] = useState<Record<string, ClientDetail[]>>(initialClientDetails);
-  const [metrics, setMetrics] = useState<Record<string, ClientMetrics[]>>(initialClientMetrics);
-  const [loaded, setLoaded] = useState(false);
+const REFRESH_INTERVAL_MS = 15_000;
 
-  useEffect(() => {
-    const DATA_VERSION = "v13";
-    try {
-      if (localStorage.getItem("thyleads_data_version") !== DATA_VERSION) {
-        localStorage.removeItem("thyleads_projects");
-        localStorage.removeItem("thyleads_details");
-        localStorage.removeItem("thyleads_metrics");
-        localStorage.setItem("thyleads_data_version", DATA_VERSION);
-      } else {
-        const p = localStorage.getItem("thyleads_projects");
-        const d = localStorage.getItem("thyleads_details");
-        const m = localStorage.getItem("thyleads_metrics");
-        if (p) setProjects(JSON.parse(p));
-        if (d) setDetails(JSON.parse(d));
-        if (m) setMetrics(JSON.parse(m));
-      }
-    } catch {}
-    setLoaded(true);
+export function DataProvider({ children }: { children: React.ReactNode }) {
+  const [projects, setProjects] = useState<ClientProject[]>([]);
+  const [details, setDetails] = useState<Record<string, ClientDetail[]>>({});
+  const [metrics, setMetrics] = useState<Record<string, ClientMetrics[]>>({});
+  const seededRef = useRef(false);
+
+  const fetchAll = useCallback(async () => {
+    const [pRes, dRes, mRes] = await Promise.all([
+      fetch("/api/projects", { cache: "no-store" }),
+      fetch("/api/details", { cache: "no-store" }),
+      fetch("/api/metrics", { cache: "no-store" }),
+    ]);
+    const [pJson, dJson, mJson] = await Promise.all([pRes.json(), dRes.json(), mRes.json()]);
+    setProjects(pJson.projects ?? []);
+    setDetails(dJson.details ?? {});
+    setMetrics(mJson.metrics ?? {});
+    return (pJson.projects ?? []).length as number;
   }, []);
 
-  useEffect(() => { if (loaded) localStorage.setItem("thyleads_projects", JSON.stringify(projects)); }, [projects, loaded]);
-  useEffect(() => { if (loaded) localStorage.setItem("thyleads_details", JSON.stringify(details)); }, [details, loaded]);
-  useEffect(() => { if (loaded) localStorage.setItem("thyleads_metrics", JSON.stringify(metrics)); }, [metrics, loaded]);
+  const refresh = useCallback(async () => {
+    await fetchAll();
+  }, [fetchAll]);
 
-  const setProjectsCb = useCallback((v: ClientProject[]) => setProjects(v), []);
-  const setDetailsCb = useCallback((v: Record<string, ClientDetail[]>) => setDetails(v), []);
-  const setMetricsCb = useCallback((v: Record<string, ClientMetrics[]>) => setMetrics(v), []);
-  useCrossTabSync("thyleads_projects", setProjectsCb);
-  useCrossTabSync("thyleads_details", setDetailsCb);
-  useCrossTabSync("thyleads_metrics", setMetricsCb);
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const count = await fetchAll();
+      if (cancelled) return;
+      if (count === 0 && !seededRef.current) {
+        seededRef.current = true;
+        await fetch("/api/seed-data", { method: "POST" });
+        if (!cancelled) await fetchAll();
+      }
+    })();
+
+    const interval = setInterval(() => {
+      if (!document.hidden) void fetchAll();
+    }, REFRESH_INTERVAL_MS);
+
+    const onFocus = () => void fetchAll();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [fetchAll]);
 
   function addProject(project: ClientProject) {
     setProjects((prev) => [...prev, project]);
+    void fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(project),
+    }).then(() => fetchAll());
   }
 
   function updateProject(id: string, data: Partial<ClientProject>) {
     setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...data } : p)));
+    void fetch("/api/projects", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, data }),
+    });
   }
 
   function addDetail(projectId: string, detail: ClientDetail) {
-    setDetails((prev) => ({
-      ...prev,
-      [projectId]: [...(prev[projectId] ?? []), detail],
-    }));
+    setDetails((prev) => ({ ...prev, [projectId]: [...(prev[projectId] ?? []), detail] }));
+    void fetch("/api/details", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, detail }),
+    });
   }
 
   function updateDetail(projectId: string, detailId: string, data: Partial<ClientDetail>) {
@@ -108,6 +113,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       ...prev,
       [projectId]: (prev[projectId] ?? []).map((d) => (d.id === detailId ? { ...d, ...data } : d)),
     }));
+    void fetch("/api/details", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, detailId, data }),
+    });
   }
 
   function deleteDetail(projectId: string, detailId: string) {
@@ -115,6 +125,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       ...prev,
       [projectId]: (prev[projectId] ?? []).filter((d) => d.id !== detailId),
     }));
+    void fetch(`/api/details?projectId=${encodeURIComponent(projectId)}&detailId=${encodeURIComponent(detailId)}`, {
+      method: "DELETE",
+    });
   }
 
   function addMetric(projectId: string, date: string, month: string, year: number, leads: number, accounts: number) {
@@ -136,6 +149,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         [projectId]: [...list, { clientId: projectId, month, year, dailyMetrics: [{ date, leadsUploaded: leads, accountsMined: accounts }] }],
       };
     });
+    void fetch("/api/metrics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, date, month, year, leads, accounts }),
+    });
   }
 
   function updateMetric(projectId: string, month: string, year: number, date: string, data: Partial<DailyMetric>) {
@@ -147,6 +165,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           : m
       ),
     }));
+    void fetch("/api/metrics", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId, month, year, date, data }),
+    });
   }
 
   function deleteMetric(projectId: string, month: string, year: number, date: string) {
@@ -158,10 +181,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           : m
       ),
     }));
+    const qs = new URLSearchParams({ projectId, month, year: String(year), date });
+    void fetch(`/api/metrics?${qs.toString()}`, { method: "DELETE" });
   }
 
   return (
-    <DataContext.Provider value={{ projects, addProject, updateProject, details, addDetail, updateDetail, deleteDetail, metrics, addMetric, updateMetric, deleteMetric }}>
+    <DataContext.Provider value={{ projects, addProject, updateProject, details, addDetail, updateDetail, deleteDetail, metrics, addMetric, updateMetric, deleteMetric, refresh }}>
       {children}
     </DataContext.Provider>
   );
