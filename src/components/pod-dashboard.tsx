@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Building2,
@@ -13,22 +14,44 @@ import { usePods } from "@/lib/pod-context";
 import { useData } from "@/lib/data-context";
 import NotificationBell from "@/components/notification-bell";
 
+const MONTH_OPTIONS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
 export default function PodDashboard({ podId, userName }: { podId: string; userName: string }) {
   const { podMap } = usePods();
   const { projects, details, metrics } = useData();
+
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => MONTH_OPTIONS[new Date().getMonth()]);
+  const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
 
   const pod = podMap[podId];
   const podProjects = projects.filter((p) => p.assignedPod === podId);
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    Object.values(details).forEach((list) => list.forEach((d) => years.add(d.year)));
+    years.add(new Date().getFullYear());
+    return Array.from(years).sort((a, b) => b - a);
+  }, [details]);
+
+  const completedByProject: Record<string, number> = {};
+  for (const p of podProjects) {
+    completedByProject[p.id] = (details[p.id] ?? []).filter(
+      (d) => d.meetingStatus === "done" && d.month === selectedMonth && d.year === selectedYear
+    ).length;
+  }
+
   const totalTarget = podProjects.reduce((s, p) => s + p.monthlyTargetInternal, 0);
-  const totalCompleted = podProjects.reduce((s, p) => s + (p.meetingCompleted || 0), 0);
+  const totalCompleted = podProjects.reduce((s, p) => s + (completedByProject[p.id] || 0), 0);
   const avgCompletion = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0;
-  const atRisk = podProjects.filter((p) => p.monthlyTargetInternal > 0 && Math.round(((p.meetingCompleted || 0) / p.monthlyTargetInternal) * 100) < 50).length;
+  const atRisk = podProjects.filter((p) => p.monthlyTargetInternal > 0 && Math.round(((completedByProject[p.id] || 0) / p.monthlyTargetInternal) * 100) < 50).length;
 
   function getHealth(p: typeof podProjects[0]) {
     if (p.monthlyTargetInternal === 0) return { color: "bg-slate-400", label: "N/A" };
-    const pct = Math.round(((p.meetingCompleted || 0) / p.monthlyTargetInternal) * 100);
+    const pct = Math.round(((completedByProject[p.id] || 0) / p.monthlyTargetInternal) * 100);
     if (pct >= 75) return { color: "bg-emerald-500", label: "On Track" };
     if (pct >= 50) return { color: "bg-amber-400", label: "Needs Attention" };
     return { color: "bg-red-500", label: "At Risk" };
@@ -50,7 +73,30 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
               <span className="text-sm">{today}</span>
             </div>
           </div>
-          <NotificationBell />
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-white border border-slate-200/80 rounded-xl px-3 py-2 shadow-sm">
+              <CalendarDays size={16} className="text-[#6800FF]" />
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="text-sm font-medium text-slate-700 bg-transparent focus:outline-none cursor-pointer"
+              >
+                {MONTH_OPTIONS.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="text-sm font-medium text-slate-700 bg-transparent focus:outline-none cursor-pointer"
+              >
+                {availableYears.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+            <NotificationBell />
+          </div>
         </div>
       </div>
 
@@ -96,7 +142,8 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {podProjects.map((project) => {
                 const health = getHealth(project);
-                const pct = project.monthlyTargetInternal > 0 ? Math.round(((project.meetingCompleted || 0) / project.monthlyTargetInternal) * 100) : 0;
+                const completed = completedByProject[project.id] || 0;
+                const pct = project.monthlyTargetInternal > 0 ? Math.round((completed / project.monthlyTargetInternal) * 100) : 0;
                 const detailCount = details[project.id]?.length ?? 0;
                 const metricDays = metrics[project.id]?.reduce((s, m) => s + m.dailyMetrics.length, 0) ?? 0;
 
@@ -151,7 +198,7 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
                         </div>
                         <div>
                           <p className="text-[10px] text-slate-400 uppercase">Achieved</p>
-                          <p className="text-sm font-semibold text-slate-700 tabular-nums">{project.meetingCompleted || 0}</p>
+                          <p className="text-sm font-semibold text-slate-700 tabular-nums">{completed}</p>
                         </div>
                         <div>
                           <p className="text-[10px] text-slate-400 uppercase">Ext Target</p>

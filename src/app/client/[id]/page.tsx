@@ -12,6 +12,11 @@ import ConfirmDelete from "@/components/confirm-delete";
 
 const inputClass = "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]";
 
+const MONTH_OPTIONS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
 const contactCols = [
   { label: "Meeting ID", short: "ID", bp: 100, w: 110 },
   { label: "Month", short: "Mon", bp: 90, w: 100 },
@@ -300,8 +305,19 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-5 mb-3 space-y-3">
               <p className="text-sm font-semibold text-slate-700">{editingDetailId ? "Edit Record" : "New Record"}</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-                <input placeholder="Month (e.g. April)" value={detailForm.month} onChange={(e) => setDetailForm({ ...detailForm, month: e.target.value })} className={inputClass} />
-                <input placeholder="Year" value={detailForm.year} onChange={(e) => setDetailForm({ ...detailForm, year: e.target.value })} className={inputClass} />
+                <select value={detailForm.month} onChange={(e) => setDetailForm({ ...detailForm, month: e.target.value })} className={inputClass}>
+                  <option value="">Select Month</option>
+                  {MONTH_OPTIONS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select value={detailForm.year} onChange={(e) => setDetailForm({ ...detailForm, year: e.target.value })} className={inputClass}>
+                  <option value="">Select Year</option>
+                  {(() => {
+                    const current = new Date().getFullYear();
+                    const years = new Set<number>([current - 1, current, current + 1]);
+                    records.forEach((r) => years.add(r.year));
+                    return Array.from(years).sort((a, b) => b - a).map((y) => <option key={y} value={String(y)}>{y}</option>);
+                  })()}
+                </select>
                 <input placeholder="Geo" value={detailForm.geo} onChange={(e) => setDetailForm({ ...detailForm, geo: e.target.value })} className={inputClass} />
                 <input placeholder="Sales Rep" value={detailForm.salesRep} onChange={(e) => setDetailForm({ ...detailForm, salesRep: e.target.value })} className={inputClass} />
                 <input type="date" value={detailForm.meetingDate} onChange={(e) => setDetailForm({ ...detailForm, meetingDate: e.target.value })} className={inputClass} />

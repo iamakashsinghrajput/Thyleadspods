@@ -22,8 +22,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Thyleads - Employee Tracking",
-  description: "Thyleads employee tracking dashboard",
+  title: "Thyleads - Internal Dashboard",
+  description: "Thyleads employee internal dashboard",
 };
 
 export default function RootLayout({
