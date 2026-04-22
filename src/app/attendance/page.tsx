@@ -451,9 +451,7 @@ export default function AttendancePage() {
 
   const isMissedPunchOut = (r: AttendanceRecord) =>
     !!(r.punchIn && !r.punchOut && r.date !== todayDate && r.date < todayDate);
-  const missedPunchOutDays = monthRecords.filter(isMissedPunchOut);
-  const missedPunchOut = missedPunchOutDays[0] ?? null;
-  const missedDateSet = new Set(missedPunchOutDays.map((r) => r.date));
+  const missedDateSet = new Set(monthRecords.filter(isMissedPunchOut).map((r) => r.date));
 
   function to12h(t: string) {
     if (!t || t.includes("AM") || t.includes("PM")) return t;
@@ -699,10 +697,10 @@ export default function AttendancePage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1">
             <div className="md:col-span-2 flex flex-col">
               <h2 className="text-lg font-bold text-slate-900 mb-3 px-1">Quick status</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 sm:grid-rows-2 gap-4 flex-1">
                 {[
-                  { icon: ClipboardList, title: "Project", desc: "Lorem ipsum dolor sit amet, consectetur.", extra: null },
-                  { icon: ArrowUpRight, title: "Leave", desc: null, extra: (() => {
+                  { icon: ArrowRight, title: "Holiday", desc: null, span: true, extra: <><p className="text-sm font-semibold text-[#6800FF] mb-0.5">{nextHoliday.date.split("-")[2]} {nextHoliday.name}</p><p className="text-sm font-semibold text-slate-900">{nextHoliday.day}</p></>, onClick: () => setShowHolidays(true) },
+                  { icon: ArrowUpRight, title: "Leave", desc: null, span: false, extra: (() => {
                     const latest = myLeaveRequests[0];
                     if (!latest) return <p className="text-sm text-slate-400">No leave requests</p>;
                     return (
@@ -714,8 +712,7 @@ export default function AttendancePage() {
                       </div>
                     );
                   })(), onClick: () => { setShowLeavePopup(true); setLeaveStep("select"); setLeaveType(""); setCustomReason(""); setLeaveBody(""); } },
-                  { icon: ArrowRight, title: "Holiday", desc: null, extra: <><p className="text-sm font-semibold text-[#6800FF] mb-0.5">{nextHoliday.date.split("-")[2]} {nextHoliday.name}</p><p className="text-sm font-semibold text-slate-900">{nextHoliday.day}</p></>, onClick: () => setShowHolidays(true) },
-                  { icon: Video, title: "Meeting", desc: null, extra: (() => {
+                  { icon: Video, title: "Meeting", desc: null, span: false, extra: (() => {
                     if (calendarConnected === false) return <p className="text-sm text-slate-400">Connect calendar</p>;
                     if (!nextMeeting) return <p className="text-sm text-slate-400">No meetings today</p>;
                     const live = isMeetingNow(nextMeeting.start, nextMeeting.end);
@@ -731,8 +728,9 @@ export default function AttendancePage() {
                 ].map((card) => {
                   const Icon = card.icon;
                   const onClick = "onClick" in card ? (card as { onClick: () => void }).onClick : undefined;
+                  const spanClass = card.span ? "sm:row-span-2 h-full" : "";
                   return (
-                    <div key={card.title} onClick={onClick} className={`bg-white rounded-2xl p-6 shadow-sm relative overflow-hidden flex flex-col justify-center ${onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}>
+                    <div key={card.title} onClick={onClick} className={`bg-white rounded-2xl p-6 shadow-sm relative overflow-hidden flex flex-col justify-center ${spanClass} ${onClick ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}>
                       <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/3 flex items-center justify-center opacity-30 pointer-events-none">
                         <div className="w-32 h-32 rounded-full border-16 border-orange-100 flex items-center justify-center">
                           <div className="w-16 h-16 rounded-full border-16 border-orange-200 flex items-center justify-center">
