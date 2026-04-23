@@ -583,7 +583,8 @@ export default function AttendancePage() {
                       <p className="text-xs text-slate-400 italic px-1">No members assigned</p>
                     )}
                     {pod.members.map((memberName) => {
-                      const rec = podAttendanceRecords.find((r) => r.userName === memberName);
+                      const firstToken = (s: string) => (s || "").trim().toLowerCase().split(/\s+/)[0] || "";
+                      const rec = podAttendanceRecords.find((r) => firstToken(r.userName) === firstToken(memberName));
                       const statusLabel = rec ? rec.status : "absent";
                       const hrs = rec ? Math.floor(rec.totalMinutes / 60) : 0;
                       const mins = rec ? rec.totalMinutes % 60 : 0;
@@ -621,6 +622,57 @@ export default function AttendancePage() {
                 </div>
               ))}
             </div>
+
+            {(() => {
+              const firstToken = (s: string) => (s || "").trim().toLowerCase().split(/\s+/)[0] || "";
+              const assignedTokens = new Set(pods.flatMap((p) => p.members.map(firstToken)));
+              const unassigned = podAttendanceRecords.filter((r) => !assignedTokens.has(firstToken(r.userName)));
+              if (unassigned.length === 0) return null;
+              return (
+                <div className="mt-4 bg-slate-50/60 rounded-2xl p-4 border border-dashed border-slate-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+                    <h3 className="font-bold text-slate-800">Unassigned</h3>
+                    <span className="ml-auto text-xs text-slate-400">{unassigned.length} record{unassigned.length === 1 ? "" : "s"}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mb-3">Attendance records whose user isn&apos;t in any pod roster — check pod membership.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {unassigned.map((rec) => {
+                      const hrs = Math.floor(rec.totalMinutes / 60);
+                      const mins = rec.totalMinutes % 60;
+                      return (
+                        <div key={rec.userId} className="bg-white rounded-xl p-3 flex items-center justify-between border border-slate-100">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-xs font-bold shrink-0">
+                              {rec.userName[0]}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-800 truncate">{rec.userName}</p>
+                              <p className="text-[11px] text-slate-400">
+                                {rec.punchIn ? to12h(rec.punchIn) : "--"} → {rec.punchOut ? to12h(rec.punchOut) : rec.punchIn ? "active" : "--"}
+                                {rec.isWfh && <span className="ml-1 text-[#6800FF] font-semibold">WFH</span>}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0 ml-2">
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                              rec.status === "present" ? "bg-emerald-50 text-emerald-700" :
+                              rec.status === "half-day" ? "bg-amber-50 text-amber-700" :
+                              rec.status === "leave" ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500"
+                            }`}>
+                              {rec.status}
+                            </span>
+                            {rec.totalMinutes > 0 && (
+                              <p className="text-[11px] text-slate-400 mt-0.5 tabular-nums">{hrs}h {mins}m</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {(() => {
               const wfhToday = podAttendanceRecords.filter((r) => r.isWfh);
