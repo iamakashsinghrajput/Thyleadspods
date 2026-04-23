@@ -8,8 +8,11 @@ import { usePods } from "@/lib/pod-context";
 import { SEED_USERS } from "@/lib/seed-users";
 
 const FLIP_GIF_W = 224;
-const FLIP_GIF_H = 88;
+const FLIP_GIF_H = 96;
+const FLIP_ASSET_PATH = "/api/signatures/flip-animation";
 let cachedFlipGif: string | null = null;
+let cachedFlipUrl: string | null = null;
+let flipUrlProbed = false;
 
 async function rasterizeSvgToImageData(svg: string, w: number, h: number): Promise<Uint8ClampedArray> {
   const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
@@ -36,16 +39,15 @@ async function rasterizeSvgToImageData(svg: string, w: number, h: number): Promi
   }
 }
 
-const FRONT_CONTENT = `<g transform="translate(48 18) scale(0.65)"><path d="M33.54 78V20.0792H12.48V10.8119H67.86V27.0297H78V0H0V30.8911H21.84V78H33.54Z" fill="#6800FF"/><path d="M55.38 20.0792H43.68V78H78V68.7327H55.38V20.0792Z" fill="#6800FF"/></g><text x="108" y="52" font-family="Arial,Helvetica,sans-serif" font-size="22" fill="#cbd5e1">|</text><text x="120" y="52" font-family="Arial,Helvetica,sans-serif" font-size="20" font-weight="700" fill="#6800FF">Thyleads</text>`;
+const FRONT_CONTENT = `<g transform="translate(46 22) scale(0.7)"><path d="M33.54 78V20.0792H12.48V10.8119H67.86V27.0297H78V0H0V30.8911H21.84V78H33.54Z" fill="#6800FF"/><path d="M55.38 20.0792H43.68V78H78V68.7327H55.38V20.0792Z" fill="#6800FF"/></g><text x="116" y="58" font-family="Arial,Helvetica,sans-serif" font-size="26" fill="#cbd5e1">|</text><text x="128" y="58" font-family="Arial,Helvetica,sans-serif" font-size="22" font-weight="700" fill="#6800FF">Thyleads</text>`;
 
-const BACK_CONTENT = `<text x="${FLIP_GIF_W / 2}" y="22" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="18" font-weight="700" fill="#6800FF">Thyleads</text><rect x="${FLIP_GIF_W / 2 - 18}" y="28" width="36" height="1" fill="#6800FF" opacity="0.3"/><g font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="600" fill="#6800FF"><circle cx="54" cy="46" r="1.8"/><text x="60" y="49">AI-Powered Outbound</text><circle cx="54" cy="62" r="1.8"/><text x="60" y="65">Inbound Qualification</text><circle cx="54" cy="78" r="1.8"/><text x="60" y="81">Deal Momentum</text></g>`;
+const BACK_CONTENT = `<text x="${FLIP_GIF_W / 2}" y="28" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="22" font-weight="700" fill="#6800FF">Thyleads</text><rect x="${FLIP_GIF_W / 2 - 18}" y="34" width="36" height="1" fill="#6800FF"/><g font-family="Arial,Helvetica,sans-serif" font-size="10" font-weight="700" fill="#6800FF"><circle cx="60" cy="52" r="2.2"/><text x="68" y="55.5">AI-Powered Outbound</text><circle cx="60" cy="70" r="2.2"/><text x="68" y="73.5">Inbound Qualification</text><circle cx="60" cy="88" r="2.2"/><text x="68" y="91.5">Deal Momentum</text></g>`;
 
 function frameSvg(side: "front" | "back", sx: number): string {
   const body = side === "front" ? FRONT_CONTENT : BACK_CONTENT;
   const cx = FLIP_GIF_W / 2;
   const scale = Math.max(sx, 0.001);
-  const skewY = side === "front" ? (1 - sx) * -3 : (1 - sx) * 3;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${FLIP_GIF_W}" height="${FLIP_GIF_H}" viewBox="0 0 ${FLIP_GIF_W} ${FLIP_GIF_H}"><rect width="100%" height="100%" fill="#ffffff"/><g transform="translate(${cx} 0) matrix(${scale} 0 ${skewY * 0.01} 1 0 0) translate(${-cx} 0)">${body}</g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${FLIP_GIF_W}" height="${FLIP_GIF_H}" viewBox="0 0 ${FLIP_GIF_W} ${FLIP_GIF_H}"><rect width="100%" height="100%" fill="#ffffff"/><g transform="translate(${cx} 0) scale(${scale} 1) translate(${-cx} 0)">${body}</g></svg>`;
 }
 
 async function buildFlipGifDataUri(): Promise<string> {
@@ -53,30 +55,45 @@ async function buildFlipGifDataUri(): Promise<string> {
   const W = FLIP_GIF_W;
   const H = FLIP_GIF_H;
 
-  const holdMs = 1600;
-  const stepMs = 55;
-  const flipSteps = [0.92, 0.75, 0.55, 0.35, 0.18, 0.06];
+  // Simulate the portal's 3D rotateY flip with cubic-bezier ease: scaleX = cos(angle).
+  // 2 intermediate steps per half-flip keep the GIF small enough to fit inside Gmail's
+  // ~10 KB signature limit while still reading as a smooth flip.
+  const halfFlip: Array<{ deg: number; delay: number }> = [
+    { deg: 45, delay: 100 },
+    { deg: 80, delay: 130 },
+  ];
+  const toSx = (deg: number) => Math.max(0.04, Math.cos((deg * Math.PI) / 180));
+  const holdMs = 2000;
 
   type Frame = { side: "front" | "back"; sx: number; delay: number };
   const frames: Frame[] = [
     { side: "front", sx: 1, delay: holdMs },
-    ...flipSteps.map<Frame>((sx) => ({ side: "front", sx, delay: stepMs })),
-    ...flipSteps.slice().reverse().map<Frame>((sx) => ({ side: "back", sx, delay: stepMs })),
+    ...halfFlip.map<Frame>(({ deg, delay }) => ({ side: "front", sx: toSx(deg), delay })),
+    ...halfFlip.slice().reverse().map<Frame>(({ deg, delay }) => ({ side: "back", sx: toSx(deg), delay })),
     { side: "back", sx: 1, delay: holdMs },
-    ...flipSteps.map<Frame>((sx) => ({ side: "back", sx, delay: stepMs })),
-    ...flipSteps.slice().reverse().map<Frame>((sx) => ({ side: "front", sx, delay: stepMs })),
+    ...halfFlip.map<Frame>(({ deg, delay }) => ({ side: "back", sx: toSx(deg), delay })),
+    ...halfFlip.slice().reverse().map<Frame>(({ deg, delay }) => ({ side: "front", sx: toSx(deg), delay })),
   ];
 
   const raster = await Promise.all(frames.map((f) => rasterizeSvgToImageData(frameSvg(f.side, f.sx), W, H)));
 
+  // Build a single global palette from front + back full-scale frames so every frame reuses it.
+  const frontFull = await rasterizeSvgToImageData(frameSvg("front", 1), W, H);
+  const backFull = await rasterizeSvgToImageData(frameSvg("back", 1), W, H);
+  const combined = new Uint8ClampedArray(frontFull.length + backFull.length);
+  combined.set(frontFull, 0);
+  combined.set(backFull, frontFull.length);
+  const globalPalette = quantize(combined, 8, { format: "rgb444" });
+
   const encoder = GIFEncoder();
   for (let i = 0; i < frames.length; i++) {
     const data = raster[i];
-    const palette = quantize(data, 32);
-    encoder.writeFrame(applyPalette(data, palette), W, H, {
-      palette,
+    const indexed = applyPalette(data, globalPalette, "rgb444");
+    encoder.writeFrame(indexed, W, H, {
+      palette: i === 0 ? globalPalette : undefined,
+      first: i === 0,
       delay: frames[i].delay,
-      dispose: 2,
+      dispose: 1,
       repeat: i === 0 ? 0 : undefined,
     });
   }
@@ -90,6 +107,39 @@ async function buildFlipGifDataUri(): Promise<string> {
   }
   cachedFlipGif = `data:image/gif;base64,${btoa(binary)}`;
   return cachedFlipGif;
+}
+
+async function ensureFlipGifUrl(origin: string, actorRole: string | undefined): Promise<string | null> {
+  if (cachedFlipUrl) return cachedFlipUrl;
+  if (!origin) return null;
+  const absolute = `${origin}${FLIP_ASSET_PATH}`;
+
+  if (!flipUrlProbed) {
+    flipUrlProbed = true;
+    try {
+      const head = await fetch(absolute, { method: "HEAD", cache: "no-store" });
+      if (head.ok) {
+        cachedFlipUrl = absolute;
+        return cachedFlipUrl;
+      }
+    } catch {}
+  }
+
+  if ((actorRole || "").toLowerCase() !== "superadmin") return null;
+
+  try {
+    const dataUri = await buildFlipGifDataUri();
+    const res = await fetch(FLIP_ASSET_PATH, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actorRole, dataUri }),
+    });
+    if (!res.ok) return null;
+    cachedFlipUrl = absolute;
+    return cachedFlipUrl;
+  } catch {
+    return null;
+  }
 }
 
 interface SignatureDoc {
@@ -310,6 +360,12 @@ export default function Signature() {
     void fetchSignatures();
   }, [user, fetchSignatures]);
 
+  useEffect(() => {
+    if (!user) return;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    void ensureFlipGifUrl(origin, user.role).catch(() => {});
+  }, [user]);
+
   if (!user) return null;
   if (!isSuperadmin && !isShareRecipient) return null;
 
@@ -417,6 +473,13 @@ export default function Signature() {
     setShareEmails((prev) => prev.filter((e) => e !== email));
   }
 
+  async function resolveFlipSrc(): Promise<string | undefined> {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const hosted = await ensureFlipGifUrl(origin, user?.role).catch(() => null);
+    if (hosted) return hosted;
+    return buildFlipGifDataUri().catch(() => undefined);
+  }
+
   async function copySignatureHtml(sig: SignatureDoc) {
     const plain = [sig.personName, sig.position, sig.phone, sig.linkedInUrl, sig.websiteUrl]
       .filter(Boolean)
@@ -424,9 +487,9 @@ export default function Signature() {
     try {
       const ClipItem = (window as unknown as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
       if (ClipItem && navigator.clipboard && "write" in navigator.clipboard) {
-        const htmlPromise = buildFlipGifDataUri()
-          .catch(() => undefined)
-          .then((gif) => new Blob([renderSignatureHtml(sig, gif)], { type: "text/html" }));
+        const htmlPromise = resolveFlipSrc().then((src) =>
+          new Blob([renderSignatureHtml(sig, src)], { type: "text/html" })
+        );
         await navigator.clipboard.write([
           new ClipItem({
             "text/html": htmlPromise,
@@ -434,8 +497,8 @@ export default function Signature() {
           }),
         ]);
       } else {
-        const gif = await buildFlipGifDataUri().catch(() => undefined);
-        await navigator.clipboard.writeText(renderSignatureHtml(sig, gif));
+        const src = await resolveFlipSrc();
+        await navigator.clipboard.writeText(renderSignatureHtml(sig, src));
       }
       setCopiedId(sig.id);
       setTimeout(() => setCopiedId(null), 1500);
@@ -453,7 +516,7 @@ export default function Signature() {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
-    const gif = await buildFlipGifDataUri().catch(() => undefined);
+    const gif = await resolveFlipSrc();
     const body = renderSignatureHtml(sig, gif);
     const plain = [sig.personName, sig.position, sig.phone, sig.linkedInUrl, sig.websiteUrl]
       .filter(Boolean)
