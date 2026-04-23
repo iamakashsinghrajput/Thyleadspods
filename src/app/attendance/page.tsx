@@ -213,6 +213,8 @@ export default function AttendancePage() {
   const [podAttendanceRecords, setPodAttendanceRecords] = useState<PodAttendanceRow[]>([]);
   const [podAttendanceDate, setPodAttendanceDate] = useState<string>("");
   const [podAttendanceLoading, setPodAttendanceLoading] = useState(false);
+  const [leaveHistory, setLeaveHistory] = useState<LeaveRequest[]>([]);
+  const [regularizeHistory, setRegularizeHistory] = useState<RegRequest[]>([]);
 
   const nextHoliday = getNextHoliday();
   const userId = user ? getUserId(user.name) : "";
@@ -295,15 +297,19 @@ export default function AttendancePage() {
   }, [fetchRegRequests]);
 
   const isAdmin = user?.role === "admin" || user?.role === "superadmin";
+  const isSuperadmin = user?.role === "superadmin";
 
   const fetchAdminRequests = useCallback(async () => {
     if (!isAdmin || !userId) return;
     try {
-      const res = await fetch(`/api/regularize?all=true&status=pending&approverId=${userId}`);
+      const qs = isSuperadmin
+        ? `all=true&status=pending`
+        : `all=true&status=pending&approverId=${userId}`;
+      const res = await fetch(`/api/regularize?${qs}`);
       const data = await res.json();
       setAdminRequests(data.records || []);
     } catch {}
-  }, [isAdmin, userId]);
+  }, [isAdmin, isSuperadmin, userId]);
 
   useEffect(() => {
     let ignore = false;
@@ -351,17 +357,48 @@ export default function AttendancePage() {
   const fetchAdminLeaveRequests = useCallback(async () => {
     if (!isAdmin || !userId) return;
     try {
-      const res = await fetch(`/api/leave?all=true&status=pending&approverId=${userId}`);
+      const qs = isSuperadmin
+        ? `all=true&status=pending`
+        : `all=true&status=pending&approverId=${userId}`;
+      const res = await fetch(`/api/leave?${qs}`);
       const data = await res.json();
       setAdminLeaveRequests(data.records || []);
     } catch {}
-  }, [isAdmin, userId]);
+  }, [isAdmin, isSuperadmin, userId]);
 
   useEffect(() => {
     let ignore = false;
     (async () => { if (!ignore) await fetchAdminLeaveRequests(); })();
     return () => { ignore = true; };
   }, [fetchAdminLeaveRequests]);
+
+  const fetchLeaveHistory = useCallback(async () => {
+    if (!isSuperadmin) return;
+    try {
+      const res = await fetch(`/api/leave?all=true`);
+      const data = await res.json();
+      setLeaveHistory(data.records || []);
+    } catch {}
+  }, [isSuperadmin]);
+
+  const fetchRegularizeHistory = useCallback(async () => {
+    if (!isSuperadmin) return;
+    try {
+      const res = await fetch(`/api/regularize?all=true`);
+      const data = await res.json();
+      setRegularizeHistory(data.records || []);
+    } catch {}
+  }, [isSuperadmin]);
+
+  useEffect(() => {
+    if (!podViewMode || !isSuperadmin) return;
+    let ignore = false;
+    (async () => {
+      if (ignore) return;
+      await Promise.all([fetchLeaveHistory(), fetchRegularizeHistory()]);
+    })();
+    return () => { ignore = true; };
+  }, [podViewMode, isSuperadmin, fetchLeaveHistory, fetchRegularizeHistory]);
 
   const fetchCalendarEvents = useCallback(async () => {
     if (!userId) return;
@@ -414,6 +451,7 @@ export default function AttendancePage() {
     setLeaveAdminNote("");
     await fetchAdminLeaveRequests();
     await fetchMonth();
+    if (isSuperadmin) await fetchLeaveHistory();
   }
 
   async function submitLeaveApplication() {
@@ -459,6 +497,7 @@ export default function AttendancePage() {
       body: JSON.stringify({ action, requestId }),
     });
     await fetchAdminRequests();
+    if (isSuperadmin) await fetchRegularizeHistory();
   }
 
   async function submitRegularize() {
@@ -780,6 +819,82 @@ export default function AttendancePage() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {isSuperadmin && leaveHistory.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <ClipboardList size={18} className="text-slate-500" />
+                  Leave History
+                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">{leaveHistory.length}</span>
+                </h3>
+                <div className="bg-slate-50/60 rounded-2xl border border-slate-100 overflow-hidden">
+                  <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-white/60 border-b border-slate-100">
+                    <span>User / Type</span>
+                    <span>Date</span>
+                    <span>Approver</span>
+                    <span>Status</span>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                    {leaveHistory.map((lr) => (
+                      <div key={lr._id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 px-4 py-2.5 items-center hover:bg-white/80 transition-colors">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{lr.userName}</p>
+                          <p className="text-[11px] text-slate-500 truncate">{lr.leaveType}</p>
+                        </div>
+                        <p className="text-[11px] text-slate-500 tabular-nums">{new Date(lr.leaveDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}</p>
+                        <p className="text-[11px] text-slate-500 capitalize">{(lr as LeaveRequest & { approverId?: string }).approverId || "—"}</p>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                          lr.status === "approved" ? "bg-emerald-50 text-emerald-700" :
+                          lr.status === "denied" ? "bg-red-50 text-red-600" :
+                          "bg-amber-50 text-amber-700"
+                        }`}>
+                          {lr.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {isSuperadmin && regularizeHistory.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <FileText size={18} className="text-slate-500" />
+                  Regularize History
+                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">{regularizeHistory.length}</span>
+                </h3>
+                <div className="bg-slate-50/60 rounded-2xl border border-slate-100 overflow-hidden">
+                  <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-white/60 border-b border-slate-100">
+                    <span>User / Reason</span>
+                    <span>Date</span>
+                    <span>Times</span>
+                    <span>Approver</span>
+                    <span>Status</span>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                    {regularizeHistory.map((r) => (
+                      <div key={r._id} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2.5 items-center hover:bg-white/80 transition-colors">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{r.userName}</p>
+                          <p className="text-[11px] text-slate-500 truncate">{r.reason}</p>
+                        </div>
+                        <p className="text-[11px] text-slate-500 tabular-nums">{new Date(r.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}</p>
+                        <p className="text-[11px] text-slate-500 tabular-nums">{r.punchIn} → {r.punchOut}</p>
+                        <p className="text-[11px] text-slate-500 capitalize">{(r as RegRequest & { approverId?: string }).approverId || "—"}</p>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                          r.status === "approved" ? "bg-emerald-50 text-emerald-700" :
+                          r.status === "rejected" ? "bg-red-50 text-red-600" :
+                          "bg-amber-50 text-amber-700"
+                        }`}>
+                          {r.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

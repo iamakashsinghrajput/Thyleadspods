@@ -9,11 +9,12 @@ export async function GET(req: NextRequest) {
   const all = req.nextUrl.searchParams.get("all");
 
   if (all === "true") {
-    const status = req.nextUrl.searchParams.get("status") || "pending";
+    const status = req.nextUrl.searchParams.get("status");
     const approverId = req.nextUrl.searchParams.get("approverId");
-    const query: Record<string, unknown> = { status };
+    const query: Record<string, unknown> = {};
+    if (status) query.status = status;
     if (approverId) query.approverId = approverId;
-    const records = await Regularize.find(query).sort({ createdAt: -1 }).lean();
+    const records = await Regularize.find(query).sort({ createdAt: -1 }).limit(200).lean();
     return NextResponse.json({ records: records.map((r) => ({ ...r, _id: String(r._id) })) });
   }
 
