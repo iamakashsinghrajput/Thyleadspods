@@ -23,6 +23,7 @@ import {
   LinkIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { usePods } from "@/lib/pod-context";
 import { getUserId } from "@/lib/chat-users";
 
 interface RegRequest {
@@ -161,8 +162,21 @@ function getMonthDays(year: number, month: number) {
   return days;
 }
 
+interface PodAttendanceRow {
+  userId: string;
+  userName: string;
+  date: string;
+  punchIn: string | null;
+  punchOut: string | null;
+  totalMinutes: number;
+  status: string;
+  isWfh?: boolean;
+  rePunchCount?: number;
+}
+
 export default function AttendancePage() {
   const { user } = useAuth();
+  const { pods } = usePods();
   const [today, setToday] = useState<AttendanceRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [calMonth] = useState(new Date().getMonth());
@@ -195,6 +209,10 @@ export default function AttendancePage() {
   const [calendarConnecting, setCalendarConnecting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [sessionStartAt, setSessionStartAt] = useState<{ date: string; punchIn: string; at: number } | null>(null);
+  const [podViewMode, setPodViewMode] = useState(false);
+  const [podAttendanceRecords, setPodAttendanceRecords] = useState<PodAttendanceRow[]>([]);
+  const [podAttendanceDate, setPodAttendanceDate] = useState<string>("");
+  const [podAttendanceLoading, setPodAttendanceLoading] = useState(false);
 
   const nextHoliday = getNextHoliday();
   const userId = user ? getUserId(user.name) : "";
@@ -292,6 +310,28 @@ export default function AttendancePage() {
     (async () => { if (!ignore) await fetchAdminRequests(); })();
     return () => { ignore = true; };
   }, [fetchAdminRequests]);
+
+  const fetchPodAttendance = useCallback(async (dateStr: string) => {
+    if (!isAdmin || !dateStr) return;
+    try {
+      const res = await fetch(`/api/attendance?all=true&dateFilter=${dateStr}`);
+      const data = await res.json();
+      setPodAttendanceRecords(data.records || []);
+    } catch {}
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!podViewMode || !isAdmin) return;
+    let ignore = false;
+    const target = podAttendanceDate || todayDate;
+    (async () => {
+      if (ignore) return;
+      setPodAttendanceLoading(true);
+      await fetchPodAttendance(target);
+      if (!ignore) setPodAttendanceLoading(false);
+    })();
+    return () => { ignore = true; };
+  }, [podViewMode, isAdmin, podAttendanceDate, todayDate, fetchPodAttendance]);
 
   const fetchMyLeaveRequests = useCallback(async () => {
     if (!userId) return;
@@ -498,6 +538,202 @@ export default function AttendancePage() {
 
   return (
     <div className="min-h-screen bg-[#F8F9FA] p-4 lg:p-6 font-sans text-slate-900">
+      {isAdmin && (
+        <div className="max-w-350 mx-auto mb-4 flex items-center justify-end gap-2">
+          {podViewMode && (
+            <input
+              type="date"
+              value={podAttendanceDate || todayDate}
+              onChange={(e) => setPodAttendanceDate(e.target.value)}
+              className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF] shadow-sm"
+            />
+          )}
+          <button
+            onClick={() => setPodViewMode(!podViewMode)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-[#6800FF] hover:bg-[#5800DD] text-white transition-colors shadow-sm"
+          >
+            <Users size={14} />
+            {podViewMode ? "Back to My Attendance" : "View Pod Attendance"}
+          </button>
+        </div>
+      )}
+
+      {isAdmin && podViewMode ? (
+        <div className="max-w-350 mx-auto">
+          <div className="bg-white rounded-4xl p-6 lg:p-8 shadow-sm">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900">Pod Daily Activity</h2>
+                <p className="text-sm text-slate-500 mt-1">
+                  {new Date((podAttendanceDate || todayDate) + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+                </p>
+              </div>
+              {podAttendanceLoading && <Loader2 className="text-[#6800FF] animate-spin" size={20} />}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {pods.map((pod) => (
+                <div key={pod.id} className="bg-slate-50/60 rounded-2xl p-4 border border-slate-100">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className={`w-2.5 h-2.5 rounded-full ${pod.color}`} />
+                    <h3 className="font-bold text-slate-800">{pod.name}</h3>
+                    <span className="ml-auto text-xs text-slate-400">{pod.members.length} members</span>
+                  </div>
+                  <div className="space-y-2">
+                    {pod.members.length === 0 && (
+                      <p className="text-xs text-slate-400 italic px-1">No members assigned</p>
+                    )}
+                    {pod.members.map((memberName) => {
+                      const rec = podAttendanceRecords.find((r) => r.userName === memberName);
+                      const statusLabel = rec ? rec.status : "absent";
+                      const hrs = rec ? Math.floor(rec.totalMinutes / 60) : 0;
+                      const mins = rec ? rec.totalMinutes % 60 : 0;
+                      return (
+                        <div key={memberName} className="bg-white rounded-xl p-3 flex items-center justify-between border border-slate-100">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-[#f0e6ff] text-[#6800FF] flex items-center justify-center text-xs font-bold shrink-0">
+                              {memberName[0]}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-slate-800 truncate">{memberName}</p>
+                              <p className="text-[11px] text-slate-400">
+                                {rec?.punchIn ? to12h(rec.punchIn) : "--"} → {rec?.punchOut ? to12h(rec.punchOut) : rec?.punchIn ? "active" : "--"}
+                                {rec?.isWfh && <span className="ml-1 text-[#6800FF] font-semibold">WFH</span>}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0 ml-2">
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                              !rec ? "bg-slate-100 text-slate-500" :
+                              rec.status === "present" ? "bg-emerald-50 text-emerald-700" :
+                              rec.status === "half-day" ? "bg-amber-50 text-amber-700" :
+                              rec.status === "leave" ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500"
+                            }`}>
+                              {statusLabel}
+                            </span>
+                            {rec && rec.totalMinutes > 0 && (
+                              <p className="text-[11px] text-slate-400 mt-0.5 tabular-nums">{hrs}h {mins}m</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {(() => {
+              const wfhToday = podAttendanceRecords.filter((r) => r.isWfh);
+              if (wfhToday.length === 0) return null;
+              return (
+                <div className="mt-6 bg-[#f0e6ff]/40 border border-[#e0ccff] rounded-2xl p-4">
+                  <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+                    <Home size={16} className="text-[#6800FF]" />
+                    On WFH
+                    <span className="text-xs bg-[#6800FF] text-white px-2 py-0.5 rounded-full font-bold">{wfhToday.length}</span>
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {wfhToday.map((r) => (
+                      <span key={r.userId} className="inline-flex items-center gap-1.5 px-3 py-1 bg-white border border-[#e0ccff] rounded-full text-xs font-medium text-slate-700">
+                        <span className="w-5 h-5 rounded-full bg-[#f0e6ff] text-[#6800FF] flex items-center justify-center text-[10px] font-bold">{r.userName[0]}</span>
+                        {r.userName}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {adminRequests.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <FileText size={18} className="text-[#6800FF]" />
+                  Pending Regularize Requests
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">{adminRequests.length}</span>
+                </h3>
+                <div className="space-y-3">
+                  {adminRequests.map((r) => (
+                    <div key={r._id} className="flex items-start gap-4 p-4 bg-slate-50 rounded-2xl">
+                      <div className="w-10 h-10 rounded-full bg-[#e0ccff] text-[#6800FF] flex items-center justify-center text-sm font-bold shrink-0">
+                        {r.userName[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <p className="text-sm font-semibold text-slate-900">{r.userName}</p>
+                          <span className="text-xs text-slate-400">{r.date}</span>
+                        </div>
+                        <p className="text-xs text-slate-600 mb-1">
+                          <span className="font-medium">Time:</span> {r.punchIn} → {r.punchOut}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          <span className="font-medium">Reason:</span> {r.reason}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        <button onClick={() => handleRegAction(r._id, "approve")} className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold rounded-lg transition-colors">Approve</button>
+                        <button onClick={() => handleRegAction(r._id, "reject")} className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors">Reject</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {adminLeaveRequests.length > 0 && (
+              <div className="mt-6">
+                <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                  <ClipboardList size={18} className="text-[#6800FF]" />
+                  Pending Leave Applications
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">{adminLeaveRequests.length}</span>
+                </h3>
+                <div className="space-y-4">
+                  {adminLeaveRequests.map((lr) => (
+                    <div key={lr._id} className="bg-slate-50 rounded-2xl overflow-hidden">
+                      <div className="p-5">
+                        <div className="flex items-start gap-4">
+                          <div className="w-10 h-10 rounded-full bg-[#e0ccff] text-[#6800FF] flex items-center justify-center text-sm font-bold shrink-0">
+                            {lr.userName[0]}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="text-sm font-semibold text-slate-900">{lr.userName}</p>
+                              <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
+                                <Clock size={10} /> Pending
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
+                              <span className="font-medium">{lr.leaveType}</span>
+                              <span>•</span>
+                              <span>{new Date(lr.leaveDate).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
+                            </div>
+                            <div className="bg-white rounded-xl p-4 border border-slate-100 text-sm text-slate-700 whitespace-pre-line leading-relaxed">
+                              {lr.body}
+                            </div>
+                            <div className="flex items-center gap-3 mt-4">
+                              <button
+                                onClick={() => handleLeaveAction(lr._id, "approve")}
+                                className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5"
+                              >
+                                <CheckCircle2 size={13} /> Approve
+                              </button>
+                              <button
+                                onClick={() => handleLeaveAction(lr._id, "deny")}
+                                className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5"
+                              >
+                                <XCircle size={13} /> Deny
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
       <div className="max-w-350 mx-auto flex flex-col lg:flex-row gap-4">
 
         <div className="w-full lg:w-95 shrink-0 self-stretch" style={{ perspective: "1200px" }}>
@@ -820,6 +1056,7 @@ export default function AttendancePage() {
           </div>
         </div>
       </div>
+      )}
 
       {calExpanded && (
         <>
@@ -990,43 +1227,6 @@ export default function AttendancePage() {
             </div>
           </div>
         </>
-      )}
-
-      {isAdmin && adminRequests.length > 0 && (
-        <div className="max-w-350 mx-auto mt-6">
-          <div className="bg-white rounded-4xl p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <FileText size={18} className="text-[#6800FF]" />
-              Pending Regularize Requests
-              <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">{adminRequests.length}</span>
-            </h3>
-            <div className="space-y-3">
-              {adminRequests.map((r) => (
-                <div key={r._id} className="flex items-start gap-4 p-4 bg-slate-50 rounded-2xl">
-                  <div className="w-10 h-10 rounded-full bg-[#e0ccff] text-[#6800FF] flex items-center justify-center text-sm font-bold shrink-0">
-                    {r.userName[0]}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <p className="text-sm font-semibold text-slate-900">{r.userName}</p>
-                      <span className="text-xs text-slate-400">{r.date}</span>
-                    </div>
-                    <p className="text-xs text-slate-600 mb-1">
-                      <span className="font-medium">Time:</span> {r.punchIn} → {r.punchOut}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      <span className="font-medium">Reason:</span> {r.reason}
-                    </p>
-                  </div>
-                  <div className="flex gap-2 shrink-0">
-                    <button onClick={() => handleRegAction(r._id, "approve")} className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold rounded-lg transition-colors">Approve</button>
-                    <button onClick={() => handleRegAction(r._id, "reject")} className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors">Reject</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
       )}
 
       {showLeavePopup && (
@@ -1214,63 +1414,6 @@ export default function AttendancePage() {
             </div>
           </div>
         </>
-      )}
-
-      {isAdmin && adminLeaveRequests.length > 0 && (
-        <div className="max-w-350 mx-auto mt-6">
-          <div className="bg-white rounded-4xl p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <ClipboardList size={18} className="text-[#6800FF]" />
-              Pending Leave Applications
-              <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">{adminLeaveRequests.length}</span>
-            </h3>
-            <div className="space-y-4">
-              {adminLeaveRequests.map((lr) => (
-                <div key={lr._id} className="bg-slate-50 rounded-2xl overflow-hidden">
-                  <div className="p-5">
-                    <div className="flex items-start gap-4">
-                      <div className="w-10 h-10 rounded-full bg-[#e0ccff] text-[#6800FF] flex items-center justify-center text-sm font-bold shrink-0">
-                        {lr.userName[0]}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <p className="text-sm font-semibold text-slate-900">{lr.userName}</p>
-                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
-                            <Clock size={10} /> Pending
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
-                          <span className="font-medium">{lr.leaveType}</span>
-                          <span>•</span>
-                          <span>{new Date(lr.leaveDate).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
-                        </div>
-
-                        <div className="bg-white rounded-xl p-4 border border-slate-100 text-sm text-slate-700 whitespace-pre-line leading-relaxed">
-                          {lr.body}
-                        </div>
-
-                        <div className="flex items-center gap-3 mt-4">
-                          <button
-                            onClick={() => handleLeaveAction(lr._id, "approve")}
-                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5"
-                          >
-                            <CheckCircle2 size={13} /> Approve
-                          </button>
-                          <button
-                            onClick={() => handleLeaveAction(lr._id, "deny")}
-                            className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5"
-                          >
-                            <XCircle size={13} /> Deny
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
       )}
 
       {showMeetingsPopup && (
