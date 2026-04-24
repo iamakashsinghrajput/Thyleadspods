@@ -98,15 +98,27 @@ export default function PreviewInGmailPage() {
 
   const buildAndRender = useCallback(async () => {
     if (!selected) return;
-    // Ask the signature component's html builder to give us the exact HTML that would be copied.
-    // Easiest path: call the server-rendered animation URL directly so Gmail fetches bytes.
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
-    // Cache-bust on each Reload so the iframe fetches the freshly-rendered animation.
-    const shineSrc = `${origin}/api/signatures/shine-animation?t=${refreshKey}`;
-    // Inline logo PNG (tiny, always embedded).
     const size = 28;
     const logoSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 78 78"><path d="M33.54 78V20.0792H12.48V10.8119H67.86V27.0297H78V0H0V30.8911H21.84V78H33.54Z" fill="#6800FF"/><path d="M55.38 20.0792H43.68V78H78V68.7327H55.38V20.0792Z" fill="#6800FF"/></svg>`;
     const logoSrc = `data:image/svg+xml;base64,${btoa(logoSvg)}`;
+
+    // Fetch the inline animated GIF bytes and embed as data URI (same path the real
+    // Copy-for-Gmail flow uses). Cache-busted against the refreshKey so Reload always
+    // picks up the latest render from the server.
+    let shineSrc = "";
+    try {
+      const res = await fetch(`/api/signatures/shine-animation?format=gif&inline=1&t=${refreshKey}`, { cache: "no-store" });
+      if (res.ok) {
+        const buf = await res.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = "";
+        const CHUNK = 0x8000;
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+        }
+        shineSrc = `data:image/gif;base64,${btoa(binary)}`;
+      }
+    } catch {}
 
     const linkedIn = selected.linkedInUrl
       ? `<a href="${selected.linkedInUrl}" style="color:#0f172a;text-decoration:underline;font-weight:600;white-space:nowrap;">Linkedin</a>`
@@ -115,7 +127,11 @@ export default function PreviewInGmailPage() {
       ? `<a href="${selected.websiteUrl}" style="color:#0f172a;text-decoration:underline;font-weight:600;word-break:break-all;">${selected.websiteUrl.replace(/^https?:\/\//, "")}</a>`
       : "";
     const sep = linkedIn && website ? `<span style="color:#d1d5db;margin:0 8px;">|</span>` : "";
-    const brandBlock = `<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;"><tr><td style="vertical-align:middle;padding:0 8px 0 0;"><img src="${logoSrc}" alt="Thyleads logo" width="${size}" height="${size}" style="display:block;border:0;outline:none;"/></td><td style="vertical-align:middle;color:#cbd5e1;font-size:24px;font-weight:200;padding:0 8px 0 0;line-height:1;">|</td><td style="vertical-align:middle;"><img src="${shineSrc}" alt="Thyleads" width="108" height="30" style="display:block;border:0;outline:none;"/></td></tr></table>`;
+    // If the inline fetch failed, fall back to a static text span so the preview still renders.
+    const thyleadsCell = shineSrc
+      ? `<img src="${shineSrc}" alt="Thyleads" width="108" height="30" style="display:block;border:0;outline:none;"/>`
+      : `<span style="color:#0f172a;font-size:22px;font-weight:900;letter-spacing:0.3px;line-height:1;white-space:nowrap;">Thyleads</span>`;
+    const brandBlock = `<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;"><tr><td style="vertical-align:middle;padding:0 8px 0 0;"><img src="${logoSrc}" alt="Thyleads logo" width="${size}" height="${size}" style="display:block;border:0;outline:none;"/></td><td style="vertical-align:middle;color:#cbd5e1;font-size:24px;font-weight:200;padding:0 8px 0 0;line-height:1;">|</td><td style="vertical-align:middle;">${thyleadsCell}</td></tr></table>`;
 
     const sig = `<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;font-family:Inter,Arial,sans-serif;color:#111827;">
   <tr>
@@ -238,11 +254,12 @@ export default function PreviewInGmailPage() {
           </div>
         )}
 
-        <div className="mt-4 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-800 leading-relaxed">
-          <p className="font-semibold mb-1">Heads up</p>
+        <div className="mt-4 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 leading-relaxed">
+          <p className="font-semibold mb-1">What you&apos;re seeing</p>
           <p>
-            The shine animation is fetched from <code className="px-1 py-0.5 bg-white rounded text-amber-700 font-mono">{typeof window !== "undefined" ? `${window.location.origin}/api/signatures/shine-animation` : ""}</code>.
-            On localhost this works for you in the browser, but <strong>Gmail&apos;s actual image proxy cannot reach localhost</strong> — once you deploy to a public domain, the animation will play exactly like this inside real Gmail.
+            The animation is embedded as an inline base64 data URI (same as the Copy-for-Gmail
+            clipboard output). This renders identically in Gmail web, Gmail mobile, localhost, or
+            production — no hosted URL, no Gmail image-proxy dependency.
           </p>
         </div>
       </div>

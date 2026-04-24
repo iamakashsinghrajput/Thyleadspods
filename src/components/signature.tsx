@@ -17,30 +17,16 @@ const SHINE_ASSET_PATH = "/api/signatures/shine-animation";
 let cachedLogoPng: string | null = null;
 let cachedShineGif: string | null = null;
 
-function isPublicOrigin(origin: string): boolean {
-  if (!origin) return false;
-  try {
-    const u = new URL(origin);
-    const host = u.hostname;
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return false;
-    if (/^10\./.test(host)) return false;
-    if (/^192\.168\./.test(host)) return false;
-    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function fetchInlineShineDataUri(): Promise<string | undefined> {
   if (cachedShineGif) return cachedShineGif;
+  // Prefer the sharp-rendered server GIF (dithered, with real Inter) — but if the server
+  // route is unreachable / returns an error / returns too-large bytes, fall back to the
+  // client-side gifenc encoder which is guaranteed to produce a Gmail-safe GIF.
   try {
-    // sharp-rendered, dithered, compact animated GIF — far nicer than gifenc's inline fallback.
     const res = await fetch(`${SHINE_ASSET_PATH}?format=gif&inline=1`, { cache: "force-cache" });
-    if (!res.ok) throw new Error("server render failed");
+    if (!res.ok) throw new Error(`server render failed: ${res.status}`);
     const buf = await res.arrayBuffer();
     const bytes = new Uint8Array(buf);
-    // Guard against a render too big for Gmail's signature cap.
     if (bytes.length > 8 * 1024) throw new Error("too large to inline");
     let binary = "";
     const CHUNK = 0x8000;
@@ -50,16 +36,14 @@ async function fetchInlineShineDataUri(): Promise<string | undefined> {
     cachedShineGif = `data:image/gif;base64,${btoa(binary)}`;
     return cachedShineGif;
   } catch {
-    // Last-resort: client-side gifenc GIF (low quality but guaranteed to fit).
     return buildShineGifDataUri().catch(() => undefined);
   }
 }
 
+// Always embed inline. The hosted-URL path had too many failure modes (Vercel cold start,
+// font bundling, native bindings, Gmail image-proxy caching of broken frames). An inline
+// data URI works identically on localhost, Vercel, Gmail web, Gmail mobile — everywhere.
 async function resolveShineSrc(): Promise<string | undefined> {
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-  if (isPublicOrigin(origin)) {
-    return `${origin}${SHINE_ASSET_PATH}`;
-  }
   return fetchInlineShineDataUri();
 }
 
@@ -351,16 +335,9 @@ export default function Signature() {
 
   useEffect(() => {
     if (!user) return;
-    // Prebuild the logo PNG so Copy is instant.
+    // Prebuild both embeds so the first Copy click is instant.
     void buildLogoPngDataUri().catch(() => {});
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
-    if (isPublicOrigin(origin)) {
-      // Warm the hi-quality hosted WebP so Gmail's first fetch is instant.
-      void fetch(`${origin}${SHINE_ASSET_PATH}`, { method: "GET", cache: "no-store" }).catch(() => {});
-    } else {
-      // On localhost, pre-fetch the sharp-rendered compact GIF for inline embed.
-      void fetchInlineShineDataUri().catch(() => {});
-    }
+    void fetchInlineShineDataUri().catch(() => {});
   }, [user]);
 
   if (!user) return null;
