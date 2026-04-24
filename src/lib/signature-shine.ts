@@ -32,9 +32,7 @@ export function shineFrameSvg(reveal: number, shine: number): string {
     `</linearGradient>` +
     `<clipPath id="rev"><rect x="0" y="0" width="${clipW}" height="${SHINE_H}"/></clipPath>` +
     `</defs>` +
-    // text-anchor="start" at x=0 so the "T" sits flush with the left edge — no dead space.
-    // font-weight 800 is the real portal weight; resvg now ships Inter so we don't need to
-    // compensate for a heavier Helvetica fallback like before.
+    `<rect x="0" y="0" width="${SHINE_W}" height="${SHINE_H}" fill="#ffffff"/>` +
     `<text clip-path="url(#rev)" x="0" y="${Math.round(SHINE_H * 0.74)}" font-family="Inter" font-size="${SHINE_FONT_SIZE}" font-weight="800" letter-spacing="0.22" fill="url(#g)" text-anchor="start">Thyleads</text>` +
     `</svg>`;
 }

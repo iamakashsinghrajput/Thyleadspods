@@ -21,9 +21,9 @@ export const maxDuration = 60;
 type Variant = "webp" | "gif" | "gif-inline";
 
 const KEY: Record<Variant, string> = {
-  "webp": "thyleads-shine-webp-v13",
-  "gif": "thyleads-shine-gif-v13",
-  "gif-inline": "thyleads-shine-gif-inline-v13",
+  "webp": "thyleads-shine-webp-v14",
+  "gif": "thyleads-shine-gif-v14",
+  "gif-inline": "thyleads-shine-gif-inline-v14",
 };
 
 interface AssetDoc {
@@ -109,6 +109,7 @@ async function renderRawFrames(smooth: boolean) {
     const pngBuffer = resvg.render().asPng();
     const raw = await sharp(pngBuffer)
       .resize(SHINE_W, SHINE_H, { kernel: "lanczos3" })
+      .flatten({ background: "#ffffff" })
       .ensureAlpha()
       .raw()
       .toBuffer();

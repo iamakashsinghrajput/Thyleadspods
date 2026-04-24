@@ -8,15 +8,15 @@ import { usePods } from "@/lib/pod-context";
 import { SEED_USERS } from "@/lib/seed-users";
 import { SHINE_W, SHINE_H, buildShineFramesCompact, shineFrameSvg } from "@/lib/signature-shine";
 
-const LOGO_PNG_SIZE = 28;
+const LOGO_PNG_SIZE = 22;
 const SHINE_GIF_W = SHINE_W;
 const SHINE_GIF_H = SHINE_H;
-const SHINE_DISPLAY_W = SHINE_W;
-const SHINE_DISPLAY_H = SHINE_H;
+const SHINE_DISPLAY_W = 80;
+const SHINE_DISPLAY_H = 22;
 // Bump when the server render changes. This version becomes part of the URL so Gmail's
 // image proxy (which caches external image responses aggressively) treats every version
 // as a brand-new resource instead of serving a stale cached copy.
-const SHINE_ASSET_VERSION = 13;
+const SHINE_ASSET_VERSION = 15;
 const SHINE_ASSET_BASE = "/api/signatures/shine-animation";
 const SHINE_ASSET_PATH = `${SHINE_ASSET_BASE}?v=${SHINE_ASSET_VERSION}`;
 let cachedLogoPng: string | null = null;
@@ -242,10 +242,10 @@ function ThyMarkSvg({ className = "", fill = "#ffffff" }: { className?: string; 
 
 function BrandLogo() {
   return (
-    <div className="shrink-0 flex items-center justify-start gap-1.5 sm:gap-2">
-      <ThyMarkSvg className="w-5 h-5 sm:w-7 sm:h-7 shrink-0" fill="#6800FF" />
-      <span className="text-slate-300 text-lg sm:text-2xl font-light leading-none select-none">|</span>
-      <span className="thy-brand-text text-[15px] sm:text-[22px] font-extrabold tracking-[0.01em] leading-none">Thyleads</span>
+    <div className="shrink-0 flex items-center justify-start gap-1 sm:gap-2">
+      <ThyMarkSvg className="w-[17px] h-[17px] sm:w-7 sm:h-7 shrink-0" fill="#6800FF" />
+      <span className="text-slate-300 text-sm sm:text-2xl font-light leading-none select-none">|</span>
+      <span className="thy-brand-text text-[13px] sm:text-[22px] font-extrabold tracking-[0.01em] leading-none">Thyleads</span>
     </div>
   );
 }
@@ -260,22 +260,22 @@ function renderSignatureHtml(sig: SignatureDoc, logoSrc?: string, shineSrc?: str
   const sep = linkedIn && website ? `<span style="color:#d1d5db;margin:0 8px;">|</span>` : "";
   const thyleadsCell = shineSrc
     ? `<img src="${shineSrc}" alt="Thyleads" width="${SHINE_DISPLAY_W}" height="${SHINE_DISPLAY_H}" style="display:block;border:0;outline:none;width:${SHINE_DISPLAY_W}px;height:${SHINE_DISPLAY_H}px;"/>`
-    : `<span style="color:#0f172a;font-size:22px;font-weight:900;letter-spacing:0.3px;line-height:1;white-space:nowrap;">Thyleads</span>`;
+    : `<span style="color:#0f172a;font-size:15px;font-weight:900;letter-spacing:0.2px;line-height:1;white-space:nowrap;">Thyleads</span>`;
   const logoCell = logoSrc
     ? `<img src="${logoSrc}" alt="Thyleads logo" width="${LOGO_PNG_SIZE}" height="${LOGO_PNG_SIZE}" style="display:block;border:0;outline:none;"/>`
-    : `<div style="width:${LOGO_PNG_SIZE}px;height:${LOGO_PNG_SIZE}px;background:#6800FF;border-radius:6px;"></div>`;
-  const brandBlock = `<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;"><tr><td style="vertical-align:middle;padding:0 8px 0 0;">${logoCell}</td><td style="vertical-align:middle;color:#cbd5e1;font-size:24px;font-weight:200;padding:0 8px 0 0;line-height:1;">|</td><td style="vertical-align:middle;">${thyleadsCell}</td></tr></table>`;
+    : `<div style="width:${LOGO_PNG_SIZE}px;height:${LOGO_PNG_SIZE}px;background:#6800FF;border-radius:5px;"></div>`;
+  const brandBlock = `<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;"><tr><td style="vertical-align:middle;padding:0 5px 0 0;">${logoCell}</td><td style="vertical-align:middle;color:#cbd5e1;font-size:16px;font-weight:200;padding:0 5px 0 0;line-height:1;">|</td><td style="vertical-align:middle;">${thyleadsCell}</td></tr></table>`;
   return `
-<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;font-family:Inter,Arial,sans-serif;color:#111827;">
+<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;font-family:Inter,Arial,sans-serif;color:#111827;max-width:380px;">
   <tr>
-    <td style="vertical-align:middle;padding:4px 14px 4px 0;border-right:1px solid #e2e8f0;">
+    <td style="vertical-align:middle;padding:2px 10px 2px 0;border-right:1px solid #e2e8f0;">
       ${brandBlock}
     </td>
-    <td style="vertical-align:middle;padding:4px 0 4px 14px;">
-      <div style="font-size:22px;font-weight:700;color:#6800FF;line-height:1.15;">${sig.personName}</div>
-      <div style="font-size:15px;font-weight:600;color:#111827;margin-top:4px;line-height:1.3;">${sig.position}</div>
-      <div style="margin-top:8px;color:#6b7280;font-size:13px;line-height:1.5;">${sig.phone}</div>
-      <div style="margin-top:6px;font-size:13px;line-height:1.4;">${linkedIn}${sep}${website}</div>
+    <td style="vertical-align:middle;padding:2px 0 2px 10px;">
+      <div style="font-size:15px;font-weight:700;color:#6800FF;line-height:1.15;">${sig.personName}</div>
+      <div style="font-size:11px;font-weight:600;color:#111827;margin-top:3px;line-height:1.3;">${sig.position}</div>
+      <div style="margin-top:5px;color:#6b7280;font-size:10px;line-height:1.4;">${sig.phone}</div>
+      <div style="margin-top:4px;font-size:10px;line-height:1.4;">${linkedIn}${sep}${website}</div>
     </td>
   </tr>
 </table>`.trim();
@@ -283,18 +283,18 @@ function renderSignatureHtml(sig: SignatureDoc, logoSrc?: string, shineSrc?: str
 
 function SignatureCard({ sig }: { sig: SignatureDoc }) {
   return (
-    <div className="bg-transparent px-2.5 py-2 sm:px-6 sm:py-5 rounded-xl sm:rounded-2xl border border-slate-200/60 font-[Inter,sans-serif] w-full max-w-xl">
-      <div className="flex items-center gap-2 sm:gap-5 w-full">
+    <div className="bg-transparent px-2 py-1.5 sm:px-6 sm:py-5 rounded-lg sm:rounded-2xl border border-slate-200/60 font-[Inter,sans-serif] w-full max-w-[300px] sm:max-w-xl">
+      <div className="flex items-center gap-1.5 sm:gap-5 w-full">
         <BrandLogo />
 
         <div className="w-px self-stretch bg-slate-200" aria-hidden />
 
         <div className="flex flex-col min-w-0 flex-1 text-left">
-          <h1 className="text-[15px] sm:text-[22px] font-bold text-[#6800FF] leading-tight truncate">{sig.personName || "Full name"}</h1>
-          {sig.position && <h2 className="text-[10px] sm:text-[15px] font-semibold text-slate-800 mt-0.5 sm:mt-1 truncate leading-tight">{sig.position}</h2>}
-          {sig.phone && <p className="text-[10px] sm:text-[13px] text-slate-500 mt-0.5 sm:mt-2 tracking-wide">{sig.phone}</p>}
+          <h1 className="text-[13px] sm:text-[22px] font-bold text-[#6800FF] leading-tight truncate">{sig.personName || "Full name"}</h1>
+          {sig.position && <h2 className="text-[9px] sm:text-[15px] font-semibold text-slate-800 mt-0.5 sm:mt-1 truncate leading-tight">{sig.position}</h2>}
+          {sig.phone && <p className="text-[9px] sm:text-[13px] text-slate-500 mt-0.5 sm:mt-2 tracking-wide">{sig.phone}</p>}
           {(sig.linkedInUrl || sig.websiteUrl) && (
-            <div className="mt-0.5 sm:mt-1.5 text-[10px] sm:text-[13px] font-semibold flex flex-wrap gap-x-1 sm:gap-x-1.5 justify-start">
+            <div className="mt-0.5 sm:mt-1.5 text-[9px] sm:text-[13px] font-semibold flex flex-wrap gap-x-1 sm:gap-x-1.5 justify-start">
               {sig.linkedInUrl && (
                 <a href={sig.linkedInUrl} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-[#6800FF] transition-colors underline decoration-1 underline-offset-2">
                   Linkedin

@@ -26,6 +26,7 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { usePods } from "@/lib/pod-context";
 import { getUserId } from "@/lib/chat-users";
+import { SEED_USERS } from "@/lib/seed-users";
 
 interface RegRequest {
   _id: string;
@@ -650,317 +651,495 @@ export default function AttendancePage() {
 
       {isAdmin && podViewMode && selectedMember ? (
         <div className="max-w-350 mx-auto">
-          <div className="bg-white rounded-4xl p-6 lg:p-8 shadow-sm">
-            <div className="flex items-center justify-between mb-6 gap-3">
-              <button
-                onClick={() => setSelectedMember(null)}
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-[#6800FF] transition-colors"
-              >
-                <ArrowRight size={14} className="rotate-180" />
-                Back to pod grid
-              </button>
-              <input
-                type="month"
-                value={memberMonth || `${calYear}-${String(calMonth + 1).padStart(2, "0")}`}
-                onChange={(e) => setMemberMonth(e.target.value)}
-                className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF] shadow-sm"
-              />
-            </div>
+          {(() => {
+            const monthStr = memberMonth || `${calYear}-${String(calMonth + 1).padStart(2, "0")}`;
+            const [yyyy, mm] = monthStr.split("-").map(Number);
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+            const isCurrentMonth = today.getFullYear() === yyyy && today.getMonth() + 1 === mm;
+            const daysInMonth = new Date(yyyy, mm, 0).getDate();
+            const endDay = isCurrentMonth ? today.getDate() : daysInMonth;
 
-            {(() => {
-              const monthStr = memberMonth || `${calYear}-${String(calMonth + 1).padStart(2, "0")}`;
-              const [yyyy, mm] = monthStr.split("-").map(Number);
-              const today = new Date();
-              const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-              const isCurrentMonth = today.getFullYear() === yyyy && today.getMonth() + 1 === mm;
-              const daysInMonth = new Date(yyyy, mm, 0).getDate();
-              const endDay = isCurrentMonth ? today.getDate() : daysInMonth;
+            let workingDays = 0;
+            for (let d = 1; d <= endDay; d++) {
+              const wd = new Date(yyyy, mm - 1, d).getDay();
+              if (wd !== 0 && wd !== 6) workingDays++;
+            }
 
-              let workingDays = 0;
-              for (let d = 1; d <= endDay; d++) {
-                const wd = new Date(yyyy, mm - 1, d).getDay();
-                if (wd !== 0 && wd !== 6) workingDays++;
-              }
+            const present = memberMonthRecords.filter((r) => r.status === "present").length;
+            const halfDay = memberMonthRecords.filter((r) => r.status === "half-day").length;
+            const leave = memberMonthRecords.filter((r) => r.status === "leave").length;
+            const wfh = memberMonthRecords.filter((r) => (r as AttendanceRecord & { isWfh?: boolean }).isWfh).length;
+            const attended = present + halfDay;
+            const absent = Math.max(0, workingDays - attended - leave);
+            const rate = workingDays > 0 ? Math.round((attended / workingDays) * 100) : 0;
+            const totalMinutes = memberMonthRecords.reduce((s, r) => s + (r.totalMinutes || 0), 0);
+            const hrs = Math.floor(totalMinutes / 60);
+            const mins = totalMinutes % 60;
+            const avgHrs = attended > 0 ? (totalMinutes / attended / 60).toFixed(1) : "0.0";
 
-              const present = memberMonthRecords.filter((r) => r.status === "present").length;
-              const halfDay = memberMonthRecords.filter((r) => r.status === "half-day").length;
-              const leave = memberMonthRecords.filter((r) => r.status === "leave").length;
-              const wfh = memberMonthRecords.filter((r) => (r as AttendanceRecord & { isWfh?: boolean }).isWfh).length;
-              const attended = present + halfDay;
-              const absent = Math.max(0, workingDays - attended - leave);
-              const rate = workingDays > 0 ? Math.round((attended / workingDays) * 100) : 0;
-              const totalMinutes = memberMonthRecords.reduce((s, r) => s + (r.totalMinutes || 0), 0);
-              const hrs = Math.floor(totalMinutes / 60);
-              const mins = totalMinutes % 60;
-              const avgHrs = attended > 0 ? (totalMinutes / attended / 60).toFixed(1) : "0.0";
+            const firstWeekday = new Date(yyyy, mm - 1, 1).getDay();
+            const recMap = new Map<string, AttendanceRecord>();
+            memberMonthRecords.forEach((r) => recMap.set(r.date, r));
 
-              const firstWeekday = new Date(yyyy, mm - 1, 1).getDay();
-              const recMap = new Map<string, AttendanceRecord>();
-              memberMonthRecords.forEach((r) => recMap.set(r.date, r));
+            const todayRec = memberMonthRecords.find((r) => r.date === todayStr);
+            const todayIsWfh = !!(todayRec && (todayRec as AttendanceRecord & { isWfh?: boolean }).isWfh);
+            const todayPendingLeave = memberLeaveHistory.find((lr) => lr.leaveDate === todayStr && lr.status === "approved");
+            const todayStatus: { label: string; cls: string; dot: string } =
+              todayRec?.status === "present" && !todayIsWfh ? { label: "Present today", cls: "bg-emerald-50 text-emerald-700 border-emerald-200", dot: "bg-emerald-500" }
+              : todayIsWfh ? { label: "WFH today", cls: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "bg-indigo-600" }
+              : todayRec?.status === "half-day" ? { label: "Half-day today", cls: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" }
+              : todayRec?.status === "leave" || todayPendingLeave ? { label: "On leave today", cls: "bg-red-50 text-red-700 border-red-200", dot: "bg-red-500" }
+              : { label: "Not punched in", cls: "bg-slate-50 text-slate-500 border-slate-200", dot: "bg-slate-400" };
 
-              const calendarCells: Array<{ day: number; dateStr: string; rec?: AttendanceRecord; isWeekend: boolean; isFuture: boolean; isToday: boolean; isWfh: boolean } | null> = [];
-              for (let i = 0; i < firstWeekday; i++) calendarCells.push(null);
-              for (let d = 1; d <= daysInMonth; d++) {
-                const ds = `${yyyy}-${String(mm).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-                const rec = recMap.get(ds);
-                const wd = new Date(yyyy, mm - 1, d).getDay();
-                calendarCells.push({
-                  day: d,
-                  dateStr: ds,
-                  rec,
-                  isWeekend: wd === 0 || wd === 6,
-                  isFuture: ds > todayStr,
-                  isToday: ds === todayStr,
-                  isWfh: !!(rec && (rec as AttendanceRecord & { isWfh?: boolean }).isWfh),
-                });
-              }
+            let currentStreak = 0;
+            const sortedDesc = [...memberMonthRecords].sort((a, b) => b.date.localeCompare(a.date));
+            for (const r of sortedDesc) {
+              if (r.date > todayStr) continue;
+              if (r.status === "present" || r.status === "half-day") currentStreak++;
+              else break;
+            }
 
-              return (
-                <>
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5 p-5 mb-6 rounded-3xl bg-linear-to-br from-[#f0e6ff]/70 via-white to-sky-50/50 border border-[#e0ccff]/60">
-                    <div className="flex items-center gap-4 min-w-0">
-                      <div className="w-16 h-16 rounded-2xl bg-[#6800FF] text-white flex items-center justify-center text-2xl font-bold shrink-0 shadow-lg shadow-[#6800FF]/25">
+            const calendarCells: Array<{ day: number; dateStr: string; rec?: AttendanceRecord; isWeekend: boolean; isFuture: boolean; isToday: boolean; isWfh: boolean } | null> = [];
+            for (let i = 0; i < firstWeekday; i++) calendarCells.push(null);
+            for (let d = 1; d <= daysInMonth; d++) {
+              const ds = `${yyyy}-${String(mm).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+              const rec = recMap.get(ds);
+              const wd = new Date(yyyy, mm - 1, d).getDay();
+              calendarCells.push({
+                day: d,
+                dateStr: ds,
+                rec,
+                isWeekend: wd === 0 || wd === 6,
+                isFuture: ds > todayStr,
+                isToday: ds === todayStr,
+                isWfh: !!(rec && (rec as AttendanceRecord & { isWfh?: boolean }).isWfh),
+              });
+            }
+
+            const pendingLeaves = memberLeaveHistory.filter((l) => l.status === "pending").length;
+            const pendingRegs = memberRegularizeHistory.filter((r) => r.status === "pending").length;
+            const onTimeDays = memberMonthRecords.filter((r) => r.punchIn && r.punchIn <= "09:30").length;
+            const lateDays = memberMonthRecords.filter((r) => r.punchIn && r.punchIn > "09:30").length;
+
+            return (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <button
+                    onClick={() => setSelectedMember(null)}
+                    className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
+                  >
+                    <ArrowRight size={14} className="rotate-180" />
+                    <span>Pod Attendance</span>
+                    <ChevronRight size={14} className="text-slate-300" />
+                    <span className="text-slate-900 font-semibold">{selectedMember.userName}</span>
+                  </button>
+                  <div className="flex items-center gap-2">
+                    {memberLoading && <Loader2 className="text-slate-400 animate-spin" size={14} />}
+                    <label className="text-xs font-semibold text-slate-500">Period</label>
+                    <input
+                      type="month"
+                      value={monthStr}
+                      onChange={(e) => setMemberMonth(e.target.value)}
+                      className="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 shadow-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 lg:p-6">
+                  <div className="flex flex-col lg:flex-row lg:items-center gap-5">
+                    <div className="flex items-center gap-4 min-w-0 flex-1">
+                      <div className="w-14 h-14 rounded-xl bg-slate-900 text-white flex items-center justify-center text-xl font-bold shrink-0">
                         {selectedMember.userName[0]}
                       </div>
                       <div className="min-w-0">
-                        <h2 className="text-[22px] font-bold text-slate-900 leading-tight truncate">{selectedMember.userName}</h2>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className={`w-2 h-2 rounded-full ${selectedMember.podColor}`} />
-                          <span className="text-sm text-slate-600 font-medium">{selectedMember.podName}</span>
-                          {memberLoading && <Loader2 className="text-[#6800FF] animate-spin ml-2" size={14} />}
+                        <h2 className="text-xl font-bold text-slate-900 leading-tight truncate">{selectedMember.userName}</h2>
+                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600">
+                            <span className={`w-1.5 h-1.5 rounded-full ${selectedMember.podColor}`} />
+                            {selectedMember.podName}
+                          </span>
+                          <span className="text-slate-300">·</span>
+                          <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-md border ${todayStatus.cls}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${todayStatus.dot}`} />
+                            {todayStatus.label}
+                          </span>
                         </div>
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-6 text-center md:text-left md:flex md:items-center md:gap-8">
+                    <div className="grid grid-cols-3 gap-6 lg:gap-8 shrink-0 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-8">
                       <div>
-                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Attendance</p>
-                        <p className="text-3xl font-bold text-[#6800FF] tabular-nums leading-none mt-1">{rate}%</p>
-                        <p className="text-[10px] text-slate-500 mt-1">{attended} of {workingDays} workdays</p>
+                        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Punch in</p>
+                        <p className="text-base font-bold text-slate-900 tabular-nums mt-0.5">{todayRec?.punchIn ? to12h(todayRec.punchIn) : <span className="text-slate-300 font-medium">—</span>}</p>
                       </div>
                       <div>
-                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Avg Hours</p>
-                        <p className="text-3xl font-bold text-slate-800 tabular-nums leading-none mt-1">{avgHrs}</p>
-                        <p className="text-[10px] text-slate-500 mt-1">per working day</p>
+                        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Punch out</p>
+                        <p className="text-base font-bold text-slate-900 tabular-nums mt-0.5">
+                          {todayRec?.punchOut ? to12h(todayRec.punchOut) : todayRec?.punchIn ? <span className="text-emerald-600">active</span> : <span className="text-slate-300 font-medium">—</span>}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Hours today</p>
+                        <p className="text-base font-bold text-slate-900 tabular-nums mt-0.5">
+                          {todayRec && todayRec.totalMinutes > 0 ? `${Math.floor(todayRec.totalMinutes / 60)}h ${todayRec.totalMinutes % 60}m` : <span className="text-slate-300 font-medium">—</span>}
+                        </p>
                       </div>
                     </div>
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mb-6">
-                    <div className="bg-emerald-50/70 border border-emerald-100 rounded-2xl p-3 flex flex-col">
-                      <div className="flex items-center gap-1.5 text-emerald-600"><CheckCircle2 size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Present</span></div>
-                      <p className="text-2xl font-bold text-emerald-700 tabular-nums mt-1">{present}</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Attendance</p>
+                    <p className="text-2xl font-bold text-slate-900 tabular-nums mt-1">{rate}<span className="text-base text-slate-400">%</span></p>
+                    <div className="mt-2 h-1 bg-slate-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-slate-900 rounded-full transition-all duration-500" style={{ width: `${rate}%` }} />
                     </div>
-                    <div className="bg-amber-50/70 border border-amber-100 rounded-2xl p-3 flex flex-col">
-                      <div className="flex items-center gap-1.5 text-amber-600"><Clock size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Half-day</span></div>
-                      <p className="text-2xl font-bold text-amber-700 tabular-nums mt-1">{halfDay}</p>
+                    <p className="text-[10px] text-slate-500 mt-1.5">{attended} / {workingDays} workdays</p>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />Present</p>
+                    <p className="text-2xl font-bold text-slate-900 tabular-nums mt-1">{present}</p>
+                    <p className="text-[10px] text-slate-500 mt-2.5">Full days attended</p>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-amber-500" />Half-day</p>
+                    <p className="text-2xl font-bold text-slate-900 tabular-nums mt-1">{halfDay}</p>
+                    <p className="text-[10px] text-slate-500 mt-2.5">Partial days</p>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />WFH</p>
+                    <p className="text-2xl font-bold text-slate-900 tabular-nums mt-1">{wfh}</p>
+                    <p className="text-[10px] text-slate-500 mt-2.5">Remote days</p>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500" />Leave</p>
+                    <p className="text-2xl font-bold text-slate-900 tabular-nums mt-1">{leave}</p>
+                    <p className="text-[10px] text-slate-500 mt-2.5">Approved leaves</p>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-rose-400" />Absent</p>
+                    <p className="text-2xl font-bold text-slate-900 tabular-nums mt-1">{absent}</p>
+                    <p className="text-[10px] text-slate-500 mt-2.5">Unaccounted</p>
+                  </div>
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Total hours</p>
+                    <p className="text-2xl font-bold text-slate-900 tabular-nums mt-1">{hrs}<span className="text-base text-slate-400">h</span> {mins}<span className="text-base text-slate-400">m</span></p>
+                    <p className="text-[10px] text-slate-500 mt-2.5">Avg {avgHrs}h / day</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+                  <div className="lg:col-span-3 bg-white border border-slate-200 rounded-2xl p-5">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                          <CalendarIcon size={14} className="text-slate-600" />
+                          {new Date(yyyy, mm - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">Daily attendance calendar</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2.5 text-[10px] font-medium text-slate-600">
+                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-400" />Present</span>
+                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-400" />Half</span>
+                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-indigo-400" />WFH</span>
+                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-400" />Leave</span>
+                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-rose-300" />Absent</span>
+                      </div>
                     </div>
-                    <div className="bg-red-50/70 border border-red-100 rounded-2xl p-3 flex flex-col">
-                      <div className="flex items-center gap-1.5 text-red-600"><XCircle size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Leave</span></div>
-                      <p className="text-2xl font-bold text-red-700 tabular-nums mt-1">{leave}</p>
+                    <div className="grid grid-cols-7 gap-1 mb-1.5">
+                      {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d, i) => (
+                        <div key={i} className="text-[10px] font-semibold text-slate-500 text-center py-1.5">{d}</div>
+                      ))}
                     </div>
-                    <div className="bg-[#f0e6ff]/70 border border-[#e0ccff] rounded-2xl p-3 flex flex-col">
-                      <div className="flex items-center gap-1.5 text-[#6800FF]"><Home size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">WFH</span></div>
-                      <p className="text-2xl font-bold text-[#6800FF] tabular-nums mt-1">{wfh}</p>
-                    </div>
-                    <div className="bg-rose-50/70 border border-rose-100 rounded-2xl p-3 flex flex-col">
-                      <div className="flex items-center gap-1.5 text-rose-500"><X size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Absent</span></div>
-                      <p className="text-2xl font-bold text-rose-600 tabular-nums mt-1">{absent}</p>
-                    </div>
-                    <div className="bg-sky-50/70 border border-sky-100 rounded-2xl p-3 flex flex-col">
-                      <div className="flex items-center gap-1.5 text-sky-600"><Clock size={12} /><span className="text-[10px] font-bold uppercase tracking-wider">Hours</span></div>
-                      <p className="text-xl font-bold text-sky-700 tabular-nums mt-1">{hrs}h {mins}m</p>
+                    <div className="grid grid-cols-7 gap-1">
+                      {calendarCells.map((c, i) => {
+                        if (!c) return <div key={`e-${i}`} className="aspect-square" />;
+                        const { day, dateStr, rec, isWeekend, isFuture, isToday, isWfh } = c;
+                        let cls = "bg-white text-slate-300 border-slate-100";
+                        let dotColor = "";
+                        if (isFuture) {
+                          cls = "bg-white text-slate-300 border-slate-100";
+                        } else if (isWfh) {
+                          cls = "bg-indigo-50 text-indigo-900 border-indigo-200";
+                          dotColor = "bg-indigo-500";
+                        } else if (rec?.status === "present") {
+                          cls = "bg-emerald-50 text-emerald-900 border-emerald-200";
+                          dotColor = "bg-emerald-500";
+                        } else if (rec?.status === "half-day") {
+                          cls = "bg-amber-50 text-amber-900 border-amber-200";
+                          dotColor = "bg-amber-500";
+                        } else if (rec?.status === "leave") {
+                          cls = "bg-red-50 text-red-900 border-red-200";
+                          dotColor = "bg-red-500";
+                        } else if (isWeekend) {
+                          cls = "bg-slate-50 text-slate-400 border-slate-100";
+                        } else {
+                          cls = "bg-rose-50/50 text-rose-600 border-rose-100";
+                          dotColor = "bg-rose-400";
+                        }
+                        const tooltipParts = [new Date(yyyy, mm - 1, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })];
+                        if (rec) {
+                          tooltipParts.push(`${rec.status}${isWfh ? " · WFH" : ""}`);
+                          if (rec.punchIn) tooltipParts.push(`${to12h(rec.punchIn)} → ${rec.punchOut ? to12h(rec.punchOut) : "active"}`);
+                        } else if (!isFuture && !isWeekend) {
+                          tooltipParts.push("Absent");
+                        } else if (isWeekend) {
+                          tooltipParts.push("Weekend");
+                        }
+                        return (
+                          <div
+                            key={dateStr}
+                            title={tooltipParts.join(" · ")}
+                            className={`aspect-square rounded-lg flex flex-col items-center justify-center text-sm font-semibold border relative transition-all hover:ring-1 hover:ring-slate-300 ${cls} ${isToday ? "ring-2 ring-slate-900 ring-offset-1" : ""}`}
+                          >
+                            <span>{day}</span>
+                            {dotColor && <span className={`w-1 h-1 rounded-full ${dotColor} mt-0.5`} />}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
-                  <div className="mb-6 max-w-md">
-                    <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-                      <CalendarIcon size={14} className="text-[#6800FF]" />
-                      {new Date(yyyy, mm - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })} overview
-                    </h3>
-                    <div className="bg-slate-50/60 rounded-2xl border border-slate-100 p-3">
-                      <div className="grid grid-cols-7 gap-1 mb-1">
-                        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
-                          <div key={i} className="text-[9px] font-bold text-slate-400 text-center py-0.5 uppercase tracking-wider">{d}</div>
-                        ))}
+                  <div className="lg:col-span-2 space-y-4">
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-sm font-bold text-slate-900">Month breakdown</h3>
+                        <span className="text-[10px] font-semibold text-slate-500">of {workingDays} workdays</span>
                       </div>
-                      <div className="grid grid-cols-7 gap-1">
-                        {calendarCells.map((c, i) => {
-                          if (!c) return <div key={`e-${i}`} className="h-7" />;
-                          const { day, dateStr, rec, isWeekend, isFuture, isToday, isWfh } = c;
-                          let cls = "bg-white text-slate-300 border-slate-100";
-                          if (isFuture) {
-                            cls = "bg-white text-slate-300 border-slate-100";
-                          } else if (isWfh) {
-                            cls = "bg-[#f0e6ff] text-[#6800FF] border-[#e0ccff]";
-                          } else if (rec?.status === "present") {
-                            cls = "bg-emerald-50 text-emerald-700 border-emerald-100";
-                          } else if (rec?.status === "half-day") {
-                            cls = "bg-amber-50 text-amber-700 border-amber-100";
-                          } else if (rec?.status === "leave") {
-                            cls = "bg-red-50 text-red-700 border-red-100";
-                          } else if (isWeekend) {
-                            cls = "bg-slate-50 text-slate-400 border-slate-100";
-                          } else {
-                            cls = "bg-rose-50 text-rose-500 border-rose-100";
-                          }
-                          const tooltipParts = [new Date(yyyy, mm - 1, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })];
-                          if (rec) {
-                            tooltipParts.push(`${rec.status}${isWfh ? " · WFH" : ""}`);
-                            if (rec.punchIn) tooltipParts.push(`${to12h(rec.punchIn)} → ${rec.punchOut ? to12h(rec.punchOut) : "active"}`);
-                          } else if (!isFuture && !isWeekend) {
-                            tooltipParts.push("Absent");
-                          } else if (isWeekend) {
-                            tooltipParts.push("Weekend");
-                          }
+                      <div className="space-y-3">
+                        {[
+                          { label: "Present", value: present, color: "bg-emerald-500" },
+                          { label: "Half-day", value: halfDay, color: "bg-amber-500" },
+                          { label: "WFH", value: wfh, color: "bg-indigo-500" },
+                          { label: "Leave", value: leave, color: "bg-red-500" },
+                          { label: "Absent", value: absent, color: "bg-rose-400" },
+                        ].map((row) => {
+                          const pct = workingDays > 0 ? (row.value / workingDays) * 100 : 0;
                           return (
-                            <div
-                              key={dateStr}
-                              title={tooltipParts.join(" · ")}
-                              className={`h-7 rounded-md flex items-center justify-center text-[11px] font-semibold border relative ${cls} ${isToday ? "ring-1 ring-[#6800FF] ring-offset-1" : ""}`}
-                            >
-                              <span>{day}</span>
-                              {isWfh && <span className="absolute bottom-0.5 right-0.5 w-1 h-1 rounded-full bg-[#6800FF]" />}
+                            <div key={row.label}>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-xs font-medium text-slate-700 flex items-center gap-1.5"><span className={`w-2 h-2 rounded-sm ${row.color}`} />{row.label}</span>
+                                <span className="text-xs font-bold text-slate-900 tabular-nums">{row.value} <span className="text-slate-400 font-medium">({Math.round(pct)}%)</span></span>
+                              </div>
+                              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div className={`h-full ${row.color} rounded-full transition-all duration-500`} style={{ width: `${pct}%` }} />
+                              </div>
                             </div>
                           );
                         })}
                       </div>
-                      <div className="flex flex-wrap gap-2 text-[9px] text-slate-500 mt-2.5 pt-2 border-t border-slate-100">
-                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-emerald-200" /> Present</span>
-                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-amber-200" /> Half</span>
-                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-red-200" /> Leave</span>
-                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-[#e0ccff]" /> WFH</span>
-                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-rose-200" /> Absent</span>
+                    </div>
+
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5">
+                      <h3 className="text-sm font-bold text-slate-900 mb-4">Punctuality & streaks</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">On time</p>
+                          <p className="text-xl font-bold text-emerald-600 tabular-nums mt-0.5">{onTimeDays}</p>
+                          <p className="text-[10px] text-slate-500">before 9:30 AM</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Late</p>
+                          <p className="text-xl font-bold text-amber-600 tabular-nums mt-0.5">{lateDays}</p>
+                          <p className="text-[10px] text-slate-500">after 9:30 AM</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Current streak</p>
+                          <p className="text-xl font-bold text-slate-900 tabular-nums mt-0.5">{currentStreak}<span className="text-sm text-slate-400 font-medium"> {currentStreak === 1 ? "day" : "days"}</span></p>
+                          <p className="text-[10px] text-slate-500">consecutive</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Pending</p>
+                          <p className="text-xl font-bold text-slate-900 tabular-nums mt-0.5">{pendingLeaves + pendingRegs}</p>
+                          <p className="text-[10px] text-slate-500">approval requests</p>
+                        </div>
                       </div>
                     </div>
                   </div>
+                </div>
 
-                  <details className="mb-6 group bg-slate-50/60 rounded-2xl border border-slate-100 overflow-hidden">
-                    <summary className="flex items-center justify-between cursor-pointer list-none select-none px-4 py-3 hover:bg-white/60 transition-colors">
-                      <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                        <Clock size={14} className="text-[#6800FF]" />
-                        Punch In / Out Log
-                        <span className="text-xs bg-white text-slate-500 px-2 py-0.5 rounded-full font-semibold border border-slate-100">{memberMonthRecords.length}</span>
-                      </h3>
-                      <span className="text-[11px] text-slate-400 font-medium group-open:hidden">Click to expand</span>
-                      <span className="text-[11px] text-slate-400 font-medium hidden group-open:inline">Hide</span>
-                    </summary>
-                    {memberMonthRecords.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic px-4 pb-3">No attendance records this month.</p>
-                    ) : (
-                      <div>
-                        <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-white/60 border-t border-b border-slate-100">
-                          <span>Date</span>
-                          <span>In</span>
-                          <span>Out</span>
-                          <span>Hours</span>
-                          <span>Status</span>
-                        </div>
-                        <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 bg-white">
-                          {[...memberMonthRecords].sort((a, b) => a.date.localeCompare(b.date)).map((r) => {
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                  <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">Attendance log</h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">Daily punch in/out records for {new Date(yyyy, mm - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })}</p>
+                    </div>
+                    <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded-md tabular-nums">{memberMonthRecords.length} records</span>
+                  </div>
+                  {memberMonthRecords.length === 0 ? (
+                    <div className="px-5 py-12 text-center text-sm text-slate-400">No attendance records for this month.</div>
+                  ) : (
+                    <div className="overflow-x-auto max-h-96">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+                          <tr>
+                            <th className="text-left px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Date</th>
+                            <th className="text-left px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Day</th>
+                            <th className="text-left px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Punch in</th>
+                            <th className="text-left px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Punch out</th>
+                            <th className="text-left px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Hours</th>
+                            <th className="text-left px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Type</th>
+                            <th className="text-right px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {[...memberMonthRecords].sort((a, b) => b.date.localeCompare(a.date)).map((r) => {
+                            const d = new Date(r.date);
                             const mh = Math.floor((r.totalMinutes || 0) / 60);
                             const mrem = (r.totalMinutes || 0) % 60;
                             const isWfh = (r as AttendanceRecord & { isWfh?: boolean }).isWfh;
+                            const late = r.punchIn && r.punchIn > "09:30";
                             return (
-                              <div key={r.date} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2 items-center hover:bg-slate-50 transition-colors">
-                                <div>
-                                  <p className="text-sm font-semibold text-slate-800">{new Date(r.date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}</p>
-                                  {isWfh && <p className="text-[10px] text-[#6800FF] font-semibold">WFH</p>}
-                                </div>
-                                <p className="text-[11px] text-slate-600 tabular-nums">{r.punchIn ? to12h(r.punchIn) : "—"}</p>
-                                <p className="text-[11px] text-slate-600 tabular-nums">{r.punchOut ? to12h(r.punchOut) : r.punchIn ? "active" : "—"}</p>
-                                <p className="text-[11px] text-slate-500 tabular-nums">{r.totalMinutes ? `${mh}h ${mrem}m` : "—"}</p>
-                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                                  r.status === "present" ? "bg-emerald-50 text-emerald-700" :
-                                  r.status === "half-day" ? "bg-amber-50 text-amber-700" :
-                                  r.status === "leave" ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-500"
-                                }`}>
-                                  {r.status}
-                                </span>
-                              </div>
+                              <tr key={r.date} className="hover:bg-slate-50 transition-colors">
+                                <td className="px-5 py-3 font-semibold text-slate-900 tabular-nums">{d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</td>
+                                <td className="px-5 py-3 text-slate-600">{d.toLocaleDateString("en-US", { weekday: "short" })}</td>
+                                <td className="px-5 py-3 text-slate-700 tabular-nums font-medium">
+                                  {r.punchIn ? (
+                                    <span className="inline-flex items-center gap-1.5">
+                                      {to12h(r.punchIn)}
+                                      {late && <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100">LATE</span>}
+                                    </span>
+                                  ) : <span className="text-slate-300">—</span>}
+                                </td>
+                                <td className="px-5 py-3 text-slate-700 tabular-nums font-medium">
+                                  {r.punchOut ? to12h(r.punchOut) : r.punchIn ? <span className="text-emerald-600 font-semibold">active</span> : <span className="text-slate-300">—</span>}
+                                </td>
+                                <td className="px-5 py-3 text-slate-700 tabular-nums">{r.totalMinutes ? `${mh}h ${mrem}m` : <span className="text-slate-300">—</span>}</td>
+                                <td className="px-5 py-3">
+                                  {isWfh ? <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded">WFH</span> : <span className="text-[10px] font-semibold text-slate-500">Office</span>}
+                                </td>
+                                <td className="px-5 py-3 text-right">
+                                  <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-md capitalize ${
+                                    r.status === "present" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" :
+                                    r.status === "half-day" ? "bg-amber-50 text-amber-700 border border-amber-100" :
+                                    r.status === "leave" ? "bg-red-50 text-red-700 border border-red-100" : "bg-slate-100 text-slate-600 border border-slate-200"
+                                  }`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${
+                                      r.status === "present" ? "bg-emerald-500" :
+                                      r.status === "half-day" ? "bg-amber-500" :
+                                      r.status === "leave" ? "bg-red-500" : "bg-slate-400"
+                                    }`} />
+                                    {r.status}
+                                  </span>
+                                </td>
+                              </tr>
                             );
                           })}
-                        </div>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                          <ClipboardList size={14} className="text-slate-600" />
+                          Leave requests
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">{pendingLeaves > 0 ? `${pendingLeaves} awaiting your approval` : "All requests reviewed"}</p>
                       </div>
+                      <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded-md tabular-nums">{memberLeaveHistory.length}</span>
+                    </div>
+                    {memberLeaveHistory.length === 0 ? (
+                      <div className="px-5 py-10 text-center text-sm text-slate-400">No leave requests submitted.</div>
+                    ) : (
+                      <ul className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+                        {memberLeaveHistory.map((lr) => (
+                          <li key={lr._id} className="px-5 py-3.5 flex items-start gap-3 hover:bg-slate-50 transition-colors">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-sm font-semibold text-slate-900">{lr.leaveType}</p>
+                                <span className={`inline-flex items-center gap-1 text-[10px] font-bold capitalize px-1.5 py-0.5 rounded ${
+                                  lr.status === "approved" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" :
+                                  lr.status === "denied" ? "bg-red-50 text-red-700 border border-red-100" : "bg-amber-50 text-amber-700 border border-amber-100"
+                                }`}>
+                                  <span className={`w-1 h-1 rounded-full ${
+                                    lr.status === "approved" ? "bg-emerald-500" :
+                                    lr.status === "denied" ? "bg-red-500" : "bg-amber-500"
+                                  }`} />
+                                  {lr.status}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+                                {new Date(lr.leaveDate).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+                              </p>
+                              {lr.subject && <p className="text-[12px] text-slate-600 mt-1 line-clamp-2">{lr.subject}</p>}
+                            </div>
+                            {lr.status === "pending" && (
+                              <div className="flex gap-1.5 shrink-0">
+                                <button onClick={() => handleLeaveAction(lr._id, "approve")} className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition-colors">
+                                  <CheckCircle2 size={12} /> Approve
+                                </button>
+                                <button onClick={() => handleLeaveAction(lr._id, "deny")} className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 transition-colors">
+                                  <XCircle size={12} /> Deny
+                                </button>
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
                     )}
-                  </details>
-                </>
-              );
-            })()}
+                  </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div>
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                  <ClipboardList size={12} className="text-red-500" />
-                  Leave
-                  <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-semibold">{memberLeaveHistory.length}</span>
-                </h3>
-                {memberLeaveHistory.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic px-1 py-2">None.</p>
-                ) : (
-                  <ul className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden bg-white">
-                    {memberLeaveHistory.map((lr) => (
-                      <li key={lr._id} className="px-3 py-2 flex items-center gap-3 hover:bg-slate-50/60 transition-colors">
-                        <span className={`w-1.5 h-8 rounded-full shrink-0 ${
-                          lr.status === "approved" ? "bg-emerald-400" :
-                          lr.status === "denied" ? "bg-red-400" : "bg-amber-400"
-                        }`} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-semibold text-slate-800 truncate">{lr.leaveType}</p>
-                          <p className="text-[11px] text-slate-500 truncate">
-                            {new Date(lr.leaveDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                            <span className="mx-1 text-slate-300">·</span>
-                            <span className="capitalize">{lr.status}</span>
-                          </p>
-                        </div>
-                        {lr.status === "pending" && (
-                          <div className="flex gap-1 shrink-0">
-                            <button onClick={() => handleLeaveAction(lr._id, "approve")} title="Approve" className="p-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-600 transition-colors"><CheckCircle2 size={14} /></button>
-                            <button onClick={() => handleLeaveAction(lr._id, "deny")} title="Deny" className="p-1 rounded-md bg-red-50 hover:bg-red-100 text-red-600 transition-colors"><XCircle size={14} /></button>
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                    <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                          <FileText size={14} className="text-slate-600" />
+                          Regularize requests
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">{pendingRegs > 0 ? `${pendingRegs} awaiting your approval` : "All requests reviewed"}</p>
+                      </div>
+                      <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-1 rounded-md tabular-nums">{memberRegularizeHistory.length}</span>
+                    </div>
+                    {memberRegularizeHistory.length === 0 ? (
+                      <div className="px-5 py-10 text-center text-sm text-slate-400">No regularize requests submitted.</div>
+                    ) : (
+                      <ul className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+                        {memberRegularizeHistory.map((rq) => (
+                          <li key={rq._id} className="px-5 py-3.5 flex items-start gap-3 hover:bg-slate-50 transition-colors">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-sm font-semibold text-slate-900 tabular-nums">{rq.punchIn} → {rq.punchOut}</p>
+                                <span className={`inline-flex items-center gap-1 text-[10px] font-bold capitalize px-1.5 py-0.5 rounded ${
+                                  rq.status === "approved" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" :
+                                  rq.status === "rejected" ? "bg-red-50 text-red-700 border border-red-100" : "bg-amber-50 text-amber-700 border border-amber-100"
+                                }`}>
+                                  <span className={`w-1 h-1 rounded-full ${
+                                    rq.status === "approved" ? "bg-emerald-500" :
+                                    rq.status === "rejected" ? "bg-red-500" : "bg-amber-500"
+                                  }`} />
+                                  {rq.status}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+                                {new Date(rq.date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}
+                              </p>
+                              {rq.reason && <p className="text-[12px] text-slate-600 mt-1 line-clamp-2">{rq.reason}</p>}
+                            </div>
+                            {rq.status === "pending" && (
+                              <div className="flex gap-1.5 shrink-0">
+                                <button onClick={() => handleRegAction(rq._id, "approve")} className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition-colors">
+                                  <CheckCircle2 size={12} /> Approve
+                                </button>
+                                <button onClick={() => handleRegAction(rq._id, "reject")} className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-md bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 transition-colors">
+                                  <XCircle size={12} /> Reject
+                                </button>
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
               </div>
-
-              <div>
-                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                  <FileText size={12} className="text-[#6800FF]" />
-                  Regularize
-                  <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded-full font-semibold">{memberRegularizeHistory.length}</span>
-                </h3>
-                {memberRegularizeHistory.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic px-1 py-2">None.</p>
-                ) : (
-                  <ul className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden bg-white">
-                    {memberRegularizeHistory.map((r) => (
-                      <li key={r._id} className="px-3 py-2 flex items-center gap-3 hover:bg-slate-50/60 transition-colors">
-                        <span className={`w-1.5 h-8 rounded-full shrink-0 ${
-                          r.status === "approved" ? "bg-emerald-400" :
-                          r.status === "rejected" ? "bg-red-400" : "bg-amber-400"
-                        }`} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-semibold text-slate-800 tabular-nums truncate">{r.punchIn} → {r.punchOut}</p>
-                          <p className="text-[11px] text-slate-500 truncate">
-                            {new Date(r.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                            <span className="mx-1 text-slate-300">·</span>
-                            <span className="capitalize">{r.status}</span>
-                          </p>
-                        </div>
-                        {r.status === "pending" && (
-                          <div className="flex gap-1 shrink-0">
-                            <button onClick={() => handleRegAction(r._id, "approve")} title="Approve" className="p-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-600 transition-colors"><CheckCircle2 size={14} /></button>
-                            <button onClick={() => handleRegAction(r._id, "reject")} title="Reject" className="p-1 rounded-md bg-red-50 hover:bg-red-100 text-red-600 transition-colors"><XCircle size={14} /></button>
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </div>
+            );
+          })()}
         </div>
       ) : isAdmin && podViewMode ? (
         <div className="max-w-350 mx-auto">
@@ -974,22 +1153,23 @@ export default function AttendancePage() {
                 podId: string;
                 podName: string;
                 podColor: string;
+                roleLabel: string;
                 rec?: PodAttendanceRow;
                 status: "present" | "half-day" | "leave" | "wfh" | "absent";
               };
               const rows: Row[] = [];
+              const seenNames = new Set<string>();
+
+              // 1. Pod members first.
               for (const pod of pods) {
                 for (const member of pod.members) {
                   const rec = podAttendanceRecords.find((r) => firstToken(r.userName) === firstToken(member));
                   const isWfh = !!(rec && rec.isWfh);
                   const status: Row["status"] = isWfh
                     ? "wfh"
-                    : rec?.status === "present"
-                    ? "present"
-                    : rec?.status === "half-day"
-                    ? "half-day"
-                    : rec?.status === "leave"
-                    ? "leave"
+                    : rec?.status === "present" ? "present"
+                    : rec?.status === "half-day" ? "half-day"
+                    : rec?.status === "leave" ? "leave"
                     : "absent";
                   rows.push({
                     key: `${pod.id}:${member}`,
@@ -998,14 +1178,44 @@ export default function AttendancePage() {
                     podId: pod.id,
                     podName: pod.name,
                     podColor: pod.color,
+                    roleLabel: pod.name,
                     rec,
                     status,
                   });
+                  seenNames.add(firstToken(member));
                 }
               }
-              const assignedTokens = new Set(pods.flatMap((p) => p.members.map(firstToken)));
+
+              // 2. Admins + superadmin from the seed roster (so they show as cards too).
+              for (const u of SEED_USERS) {
+                if (u.role !== "admin" && u.role !== "superadmin") continue;
+                if (seenNames.has(firstToken(u.name))) continue;
+                const rec = podAttendanceRecords.find((r) => firstToken(r.userName) === firstToken(u.name));
+                const isWfh = !!(rec && rec.isWfh);
+                const status: Row["status"] = isWfh
+                  ? "wfh"
+                  : rec?.status === "present" ? "present"
+                  : rec?.status === "half-day" ? "half-day"
+                  : rec?.status === "leave" ? "leave"
+                  : "absent";
+                const label = u.role === "superadmin" ? "Super admin" : "Admin";
+                rows.push({
+                  key: `${u.role}:${u.name}`,
+                  userName: rec?.userName || u.name,
+                  userId: rec?.userId || getUserId(u.name),
+                  podId: "",
+                  podName: label,
+                  podColor: u.role === "superadmin" ? "bg-[#6800FF]" : "bg-indigo-500",
+                  roleLabel: label,
+                  rec,
+                  status,
+                });
+                seenNames.add(firstToken(u.name));
+              }
+
+              // 3. Any attendance records for people we still haven't listed.
               for (const rec of podAttendanceRecords) {
-                if (assignedTokens.has(firstToken(rec.userName))) continue;
+                if (seenNames.has(firstToken(rec.userName))) continue;
                 const isWfh = !!rec.isWfh;
                 rows.push({
                   key: `unassigned:${rec.userId}`,
@@ -1014,9 +1224,11 @@ export default function AttendancePage() {
                   podId: "",
                   podName: "Unassigned",
                   podColor: "bg-slate-400",
+                  roleLabel: "Unassigned",
                   rec,
                   status: isWfh ? "wfh" : rec.status === "present" ? "present" : rec.status === "half-day" ? "half-day" : rec.status === "leave" ? "leave" : "absent",
                 });
+                seenNames.add(firstToken(rec.userName));
               }
 
               const counts = {
@@ -1056,63 +1268,85 @@ export default function AttendancePage() {
                     <span className="inline-flex items-center gap-1.5 text-xs font-semibold bg-rose-50 text-rose-600 px-3 py-1.5 rounded-full border border-rose-100"><span className="w-1.5 h-1.5 rounded-full bg-rose-400" />{counts.absent} Absent</span>
                   </div>
 
-                  <ul className="divide-y divide-slate-100 border border-slate-100 rounded-2xl overflow-hidden bg-white">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                     {rows.map((row) => {
                       const { userName, userId, podId, podName, podColor, rec, status, key } = row;
                       const hrs = rec ? Math.floor(rec.totalMinutes / 60) : 0;
                       const mins = rec ? rec.totalMinutes % 60 : 0;
-                      const timeLabel = rec?.punchIn
-                        ? `${to12h(rec.punchIn)} → ${rec.punchOut ? to12h(rec.punchOut) : "active"}`
-                        : status === "leave" ? "On leave" : status === "absent" ? "No punch" : "—";
-                      const statusBg =
-                        status === "present" ? "bg-emerald-500" :
-                        status === "half-day" ? "bg-amber-500" :
-                        status === "leave" ? "bg-red-500" :
-                        status === "wfh" ? "bg-[#6800FF]" : "bg-rose-300";
+                      const statusStyles: Record<Row["status"], { pill: string; ring: string; dot: string; label: string }> = {
+                        "present": { pill: "bg-emerald-50 text-emerald-700 border-emerald-100", ring: "ring-emerald-100", dot: "bg-emerald-500", label: "Present" },
+                        "half-day": { pill: "bg-amber-50 text-amber-700 border-amber-100", ring: "ring-amber-100", dot: "bg-amber-500", label: "Half-day" },
+                        "leave": { pill: "bg-red-50 text-red-700 border-red-100", ring: "ring-red-100", dot: "bg-red-500", label: "On leave" },
+                        "wfh": { pill: "bg-[#f0e6ff] text-[#6800FF] border-[#e0ccff]", ring: "ring-[#e0ccff]", dot: "bg-[#6800FF]", label: "WFH" },
+                        "absent": { pill: "bg-rose-50 text-rose-600 border-rose-100", ring: "ring-rose-100", dot: "bg-rose-400", label: "Absent" },
+                      };
+                      const s = statusStyles[status];
+                      const summaryLine = status === "leave"
+                        ? "On leave today"
+                        : status === "absent"
+                        ? (rec ? "No punch recorded" : "Not punched in")
+                        : rec && rec.totalMinutes > 0
+                        ? `${hrs}h ${mins}m worked`
+                        : rec?.punchIn
+                        ? "Shift in progress"
+                        : "No activity yet";
+
                       return (
-                        <li key={key}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedMember({ userName, userId, podId, podName, podColor })}
-                            className="w-full text-left px-4 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors"
-                          >
-                            <span className={`w-1 h-8 rounded-full shrink-0 ${statusBg}`} />
-                            <div className="w-9 h-9 rounded-full bg-[#f0e6ff] text-[#6800FF] flex items-center justify-center text-sm font-bold shrink-0">
-                              {userName[0]}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2">
-                                <p className="text-sm font-semibold text-slate-900 truncate">{userName}</p>
-                                <span className={`inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 px-1.5 py-0.5 rounded-md bg-slate-100`}>
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setSelectedMember({ userName, userId, podId, podName, podColor })}
+                          className={`group text-left relative rounded-2xl border border-slate-200 bg-white p-5 hover:border-[#6800FF]/40 hover:shadow-md transition-all ring-1 ring-transparent hover:${s.ring}`}
+                        >
+                          <div className="flex items-start justify-between gap-3 mb-4">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#f0e6ff] to-[#e0ccff] text-[#6800FF] flex items-center justify-center text-lg font-bold shrink-0">
+                                {userName[0]}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-base font-bold text-slate-900 truncate">{userName}</p>
+                                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600 mt-0.5">
                                   <span className={`w-1.5 h-1.5 rounded-full ${podColor}`} />
                                   {podName}
                                 </span>
-                                {status === "wfh" && <span className="text-[9px] font-bold bg-[#f0e6ff] text-[#6800FF] px-1.5 py-0.5 rounded uppercase tracking-wider">WFH</span>}
                               </div>
-                              <p className="text-[11px] text-slate-500 tabular-nums">{timeLabel}</p>
                             </div>
-                            <div className="text-right shrink-0 hidden sm:block">
-                              {rec && rec.totalMinutes > 0 && (
-                                <p className="text-[11px] text-slate-500 tabular-nums">{hrs}h {mins}m</p>
-                              )}
-                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize ${
-                                status === "present" ? "text-emerald-700" :
-                                status === "half-day" ? "text-amber-700" :
-                                status === "leave" ? "text-red-600" :
-                                status === "wfh" ? "text-[#6800FF]" : "text-rose-500"
-                              }`}>
-                                {status === "wfh" ? "WFH" : status === "half-day" ? "half-day" : status}
-                              </span>
+                            <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-1 rounded-full border shrink-0 ${s.pill}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+                              {s.label}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 mb-3">
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Punch in</p>
+                              <p className="text-sm font-bold text-slate-900 tabular-nums">
+                                {rec?.punchIn ? to12h(rec.punchIn) : "—"}
+                              </p>
                             </div>
-                            <ChevronRight size={14} className="text-slate-300 shrink-0" />
-                          </button>
-                        </li>
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Punch out</p>
+                              <p className="text-sm font-bold text-slate-900 tabular-nums">
+                                {rec?.punchOut ? to12h(rec.punchOut) : rec?.punchIn ? <span className="text-emerald-600">active</span> : "—"}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                            <p className="text-xs text-slate-500 font-medium">{summaryLine}</p>
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#6800FF] opacity-0 group-hover:opacity-100 transition-opacity">
+                              View details <ChevronRight size={12} />
+                            </span>
+                          </div>
+                        </button>
                       );
                     })}
                     {rows.length === 0 && (
-                      <li className="px-4 py-6 text-center text-xs text-slate-400 italic">No members yet — add pod rosters to see attendance here.</li>
+                      <div className="col-span-full rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-400 italic">
+                        No members yet — add pod rosters to see attendance here.
+                      </div>
                     )}
-                  </ul>
+                  </div>
 
                   {pendingTotal > 0 && (
                     <details className="mt-5 group rounded-2xl border border-amber-100 bg-amber-50/40 overflow-hidden">
