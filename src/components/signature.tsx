@@ -252,12 +252,21 @@ function BrandLogo() {
   );
 }
 
+// Build a canonical href from whatever variant the admin entered (e.g. "www.thyleads.com",
+// "thyleads.com", "https://www.thyleads.com"). Always returns "https://<apex-domain>/".
+function normalizeWebsiteHref(url: string): string {
+  if (!url) return "";
+  const apex = url.trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "");
+  return apex ? `https://${apex}/` : "";
+}
+
 function renderSignatureHtml(sig: SignatureDoc, logoSrc?: string, shineSrc?: string): string {
   const linkedIn = sig.linkedInUrl
     ? `<a href="${sig.linkedInUrl}" style="color:#0f172a;text-decoration:underline;font-weight:600;white-space:nowrap;">Linkedin</a>`
     : "";
+  const websiteHref = normalizeWebsiteHref(sig.websiteUrl);
   const website = sig.websiteUrl
-    ? `<a href="${sig.websiteUrl}" style="color:#0f172a;text-decoration:underline;font-weight:600;word-break:break-all;">${sig.websiteUrl.replace(/^https?:\/\//, "")}</a>`
+    ? `<a href="${websiteHref}" style="color:#0f172a;text-decoration:underline;font-weight:600;word-break:break-all;">${sig.websiteUrl.replace(/^https?:\/\//, "")}</a>`
     : "";
   const sep = linkedIn && website ? `<span style="color:#d1d5db;margin:0 8px;">|</span>` : "";
   // Wrap the animated image in a text span that also says "Thyleads". If the image loads,
@@ -309,7 +318,7 @@ function SignatureCard({ sig }: { sig: SignatureDoc }) {
               )}
               {sig.linkedInUrl && sig.websiteUrl && <span className="text-slate-300">|</span>}
               {sig.websiteUrl && (
-                <a href={sig.websiteUrl} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-[#6800FF] transition-colors underline decoration-1 underline-offset-2 break-all">
+                <a href={normalizeWebsiteHref(sig.websiteUrl)} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-[#6800FF] transition-colors underline decoration-1 underline-offset-2 break-all">
                   {sig.websiteUrl.replace(/^https?:\/\//, "")}
                 </a>
               )}
