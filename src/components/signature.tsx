@@ -11,8 +11,6 @@ import { SHINE_W, SHINE_H, buildShineFramesCompact, shineFrameSvg } from "@/lib/
 const LOGO_PNG_SIZE = 22;
 const SHINE_GIF_W = SHINE_W;
 const SHINE_GIF_H = SHINE_H;
-const SHINE_DISPLAY_W = 80;
-const SHINE_DISPLAY_H = 22;
 // Bump when the server render changes. This version becomes part of the URL so Gmail's
 // image proxy (which caches external image responses aggressively) treats every version
 // as a brand-new resource instead of serving a stale cached copy.
@@ -250,7 +248,8 @@ function BrandLogo() {
   );
 }
 
-function renderSignatureHtml(sig: SignatureDoc, logoSrc?: string, shineSrc?: string): string {
+function renderSignatureHtml(sig: SignatureDoc, logoSrc?: string, _shineSrc?: string): string {
+  void _shineSrc;
   const linkedIn = sig.linkedInUrl
     ? `<a href="${sig.linkedInUrl}" style="color:#0f172a;text-decoration:underline;font-weight:600;white-space:nowrap;">Linkedin</a>`
     : "";
@@ -258,13 +257,11 @@ function renderSignatureHtml(sig: SignatureDoc, logoSrc?: string, shineSrc?: str
     ? `<a href="${sig.websiteUrl}" style="color:#0f172a;text-decoration:underline;font-weight:600;word-break:break-all;">${sig.websiteUrl.replace(/^https?:\/\//, "")}</a>`
     : "";
   const sep = linkedIn && website ? `<span style="color:#d1d5db;margin:0 8px;">|</span>` : "";
-  const thyleadsCell = shineSrc
-    ? `<img src="${shineSrc}" alt="Thyleads" width="${SHINE_DISPLAY_W}" height="${SHINE_DISPLAY_H}" style="display:block;border:0;outline:none;width:${SHINE_DISPLAY_W}px;height:${SHINE_DISPLAY_H}px;"/>`
-    : `<span style="color:#0f172a;font-size:15px;font-weight:900;letter-spacing:0.2px;line-height:1;white-space:nowrap;">Thyleads</span>`;
+  const thyleadsCell = `<span style="color:#0f172a;font-family:Inter,Arial,sans-serif;font-size:16px;font-weight:800;letter-spacing:0.2px;line-height:1;white-space:nowrap;">Thyleads</span>`;
   const logoCell = logoSrc
     ? `<img src="${logoSrc}" alt="Thyleads logo" width="${LOGO_PNG_SIZE}" height="${LOGO_PNG_SIZE}" style="display:block;border:0;outline:none;"/>`
     : `<div style="width:${LOGO_PNG_SIZE}px;height:${LOGO_PNG_SIZE}px;background:#6800FF;border-radius:5px;"></div>`;
-  const brandBlock = `<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;"><tr><td style="vertical-align:middle;padding:0 5px 0 0;">${logoCell}</td><td style="vertical-align:middle;color:#cbd5e1;font-size:16px;font-weight:200;padding:0 5px 0 0;line-height:1;">|</td><td style="vertical-align:middle;">${thyleadsCell}</td></tr></table>`;
+  const brandBlock = `<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;"><tr><td style="vertical-align:middle;padding:0 6px 0 0;">${logoCell}</td><td style="vertical-align:middle;color:#cbd5e1;font-size:16px;font-weight:200;padding:0 6px 0 0;line-height:1;">|</td><td style="vertical-align:middle;">${thyleadsCell}</td></tr></table>`;
   return `
 <table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;font-family:Inter,Arial,sans-serif;color:#111827;max-width:380px;">
   <tr>
