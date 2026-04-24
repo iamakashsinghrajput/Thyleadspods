@@ -18,9 +18,9 @@ export const runtime = "nodejs";
 type Variant = "webp" | "gif" | "gif-inline";
 
 const KEY: Record<Variant, string> = {
-  "webp": "thyleads-shine-webp-v7-inter",
-  "gif": "thyleads-shine-gif-v7-inter",
-  "gif-inline": "thyleads-shine-gif-inline-v7-inter",
+  "webp": "thyleads-shine-webp-v8",
+  "gif": "thyleads-shine-gif-v8",
+  "gif-inline": "thyleads-shine-gif-inline-v8",
 };
 
 interface AssetDoc {
@@ -28,33 +28,50 @@ interface AssetDoc {
   contentType?: string;
 }
 
-const FONTS_DIR = path.join(process.cwd(), "fonts");
-const FONT_FILES = [
-  path.join(FONTS_DIR, "Inter-Regular.ttf"),
-  path.join(FONTS_DIR, "Inter-ExtraBold.ttf"),
+const FONT_CANDIDATE_DIRS = [
+  // Local dev: fonts live at the repo root.
+  path.join(process.cwd(), "fonts"),
+  // Vercel-traced asset locations (both classic and output-tracing-include roots).
+  path.join(process.cwd(), ".next", "server", "fonts"),
+  path.join("/var/task", "fonts"),
 ];
+
+async function resolveFontFiles(): Promise<string[]> {
+  const { access } = await import("fs/promises");
+  const filenames = ["Inter-Regular.ttf", "Inter-ExtraBold.ttf"];
+  for (const dir of FONT_CANDIDATE_DIRS) {
+    try {
+      const found: string[] = [];
+      for (const f of filenames) {
+        const full = path.join(dir, f);
+        await access(full);
+        found.push(full);
+      }
+      if (found.length === filenames.length) return found;
+    } catch {}
+  }
+  return [];
+}
 
 async function renderRawFrames(smooth: boolean) {
   const frames = smooth ? buildShineFramesSmooth() : buildShineFramesCompact();
+  const fontFiles = await resolveFontFiles();
   const rawFrames: Buffer[] = [];
   for (const f of frames) {
     const svg = shineFrameSvg(f.reveal, f.shine);
-    // resvg-js gives us Skia-grade SVG rasterization with the real Inter typeface
-    // instead of librsvg's Helvetica fallback.
+    // resvg-js — Skia-grade SVG rasterization. If we found the bundled Inter TTFs,
+    // use them exclusively; otherwise fall back to system fonts so the render never fails.
     const resvg = new Resvg(svg, {
       background: "white",
       fitTo: { mode: "width", value: SHINE_W },
-      font: {
-        fontFiles: FONT_FILES,
-        loadSystemFonts: false,
-        defaultFontFamily: "Inter",
-      },
+      font: fontFiles.length > 0
+        ? { fontFiles, loadSystemFonts: false, defaultFontFamily: "Inter" }
+        : { loadSystemFonts: true, defaultFontFamily: "Inter" },
       shapeRendering: 2, // geometricPrecision
       textRendering: 2, // geometricPrecision
       imageRendering: 0, // optimizeQuality
     });
     const pngBuffer = resvg.render().asPng();
-    // Hand off to sharp only for pixel-buffer extraction at the canvas size resvg produced.
     const raw = await sharp(pngBuffer)
       .resize(SHINE_W, SHINE_H, { kernel: "lanczos3" })
       .ensureAlpha()
