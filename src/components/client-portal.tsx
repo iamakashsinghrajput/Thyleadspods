@@ -18,6 +18,88 @@ function fmtDate(d: string) {
   return new Date(d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
 }
 
+function parseMonthKey(m: { month: string; year: number }): string {
+  return `${m.month} ${m.year}`;
+}
+
+// Known client → domain map. Clearbit's logo API needs an exact domain;
+// well-known companies below resolve reliably. Anything missing falls through
+// to a lowercased-name guess, and if that fails, the initial-letter avatar.
+const CLIENT_LOGO_DOMAINS: Record<string, string> = {
+  thyleads: "thyleads.com",
+  clevertap: "clevertap.com",
+  bluedove: "bluedove.co",
+  evality: "evality.ai",
+  onecap: "onecap.in",
+  mynd: "myndsol.com",
+  actyv: "actyv.ai",
+  zigtal: "zigtal.com",
+  vwo: "vwo.com",
+  pazo: "pazo.co.in",
+  venwiz: "venwiz.com",
+  infeedo: "infeedo.ai",
+};
+
+function clientLogoDomain(name: string): string | null {
+  if (!name) return null;
+  const key = name.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return CLIENT_LOGO_DOMAINS[key] || `${key}.com`;
+}
+
+function ClientLogo({ name, size = 56 }: { name: string; size?: number }) {
+  const domain = clientLogoDomain(name);
+  // Try multiple logo providers in order. Clearbit sometimes 404s after its
+  // HubSpot acquisition; Google's s2/favicons endpoint always resolves because
+  // it can fall back to a rendered letter icon from the live site. If everything
+  // fails we render a gradient initial avatar.
+  const sources = domain
+    ? [
+        `https://logo.clearbit.com/${domain}`,
+        `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+        `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+      ]
+    : [];
+  const [srcIdx, setSrcIdx] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const initial = (name || "?").trim().charAt(0).toUpperCase() || "?";
+  const showFallback = sources.length === 0 || failed;
+
+  if (showFallback) {
+    return (
+      <div
+        className="rounded-2xl bg-gradient-to-br from-[#6800FF] to-[#4a00b8] text-white flex items-center justify-center font-bold shrink-0 shadow-md shadow-[#6800FF]/20"
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.45) }}
+      >
+        {initial}
+      </div>
+    );
+  }
+  return (
+    <div
+      className="rounded-2xl bg-white border border-slate-200 flex items-center justify-center shrink-0 shadow-sm overflow-hidden"
+      style={{ width: size, height: size }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={sources[srcIdx]}
+        alt={name}
+        onError={() => {
+          if (srcIdx < sources.length - 1) setSrcIdx(srcIdx + 1);
+          else setFailed(true);
+        }}
+        className="w-full h-full object-contain"
+        style={{ padding: Math.max(4, Math.round(size * 0.12)) }}
+      />
+    </div>
+  );
+}
+
+function monthSortKey(s: string): number {
+  const [mo, yr] = s.split(" ");
+  const idx = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].indexOf(mo);
+  return Number(yr) * 12 + idx;
+}
+
 function fmtRelative(d: string) {
   if (!d) return "";
   const now = Date.now();
@@ -115,80 +197,133 @@ export default function ClientPortal() {
     }
     return true;
   }).sort((a, b) => {
+    // Newest meetings first. Fall back to time, then meeting ID for stable ordering.
+    const dateCmp = (b.meetingDate || "").localeCompare(a.meetingDate || "");
+    if (dateCmp !== 0) return dateCmp;
+    const timeCmp = (b.meetingTime || "").localeCompare(a.meetingTime || "");
+    if (timeCmp !== 0) return timeCmp;
     const numA = parseInt(a.meetingId.replace(/\D/g, ""), 10) || 0;
     const numB = parseInt(b.meetingId.replace(/\D/g, ""), 10) || 0;
-    return numA - numB;
+    return numB - numA;
   });
 
   const meetingsWithRemarks = filtered.filter((m) => remarks[m.meetingId]?.remark);
 
+  const scheduledCount = meetings.filter((m) => m.meetingStatus === "scheduled").length;
+  const pipelineCount = meetings.filter((m) => m.meetingStatus === "pipeline").length;
+  const doneCount = meetings.filter((m) => m.meetingStatus === "done").length;
+
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const upcomingMeetings = meetings
+    .filter((m) => m.meetingStatus === "scheduled" && m.meetingDate && m.meetingDate >= todayStr)
+    .sort((a, b) => a.meetingDate.localeCompare(b.meetingDate) || (a.meetingTime || "").localeCompare(b.meetingTime || ""))
+    .slice(0, 4);
+
+  const recentRemarkItems = Object.entries(remarks)
+    .filter(([, r]) => r.remark)
+    .map(([meetingId, r]) => {
+      const meeting = meetings.find((m) => m.meetingId === meetingId);
+      return meeting ? { meeting, remark: r } : null;
+    })
+    .filter((x): x is { meeting: ClientDetail; remark: RemarkData } => x !== null)
+    .sort((a, b) => new Date(b.remark.updatedAt).getTime() - new Date(a.remark.updatedAt).getTime())
+    .slice(0, 3);
+
+  const teamMap = new Map<string, { name: string; role: string; count: number }>();
+  for (const m of meetings) {
+    if (m.salesRep) {
+      const k = `rep:${m.salesRep}`;
+      const prev = teamMap.get(k);
+      teamMap.set(k, { name: m.salesRep, role: "Thyleads Rep", count: (prev?.count || 0) + 1 });
+    }
+    if (m.accountManager) {
+      const k = `am:${m.accountManager}`;
+      const prev = teamMap.get(k);
+      teamMap.set(k, { name: m.accountManager, role: "Account Manager", count: (prev?.count || 0) + 1 });
+    }
+  }
+  const teamMembers = Array.from(teamMap.values()).sort((a, b) => b.count - a.count).slice(0, 4);
+
+  // Group filtered meetings by month for the timeline list
+  const groupedByMonth = filtered.reduce<Record<string, ClientDetail[]>>((acc, m) => {
+    const key = parseMonthKey(m);
+    (acc[key] ||= []).push(m);
+    return acc;
+  }, {});
+  const monthGroupKeys = Object.keys(groupedByMonth).sort((a, b) => monthSortKey(b) - monthSortKey(a));
+
   return (
-    <div className="min-h-screen bg-[#F8F9FA] font-sans text-slate-900">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-        <div className="w-full px-6 lg:px-10 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Image src="/logo.png" alt="Thyleads" width={32} height={32} className="rounded-lg" />
-            <div>
-              <h1 className="text-lg font-bold text-slate-900">{user.name}</h1>
-              <p className="text-[11px] text-slate-400">Client Portal</p>
-            </div>
+        <div className="w-full px-6 lg:px-10 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <Image src="/logo.png" alt="Thyleads" width={28} height={28} className="rounded-lg" />
+            <span className="text-[13px] font-bold text-slate-900">Thyleads</span>
+            <span className="text-slate-300">·</span>
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Client Portal</span>
           </div>
-          <button onClick={logout} className="flex items-center gap-2 px-4 py-2 text-sm text-slate-500 hover:text-red-500 bg-slate-50 hover:bg-red-50 rounded-xl transition-colors">
-            <LogOut size={15} /> Sign Out
+          <button onClick={logout} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-red-600 bg-slate-50 hover:bg-red-50 border border-slate-200 hover:border-red-200 rounded-lg transition-colors">
+            <LogOut size={13} /> Sign out
           </button>
         </div>
       </header>
 
       <div className="w-full px-6 lg:px-10 py-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-[#6800FF]/10 flex items-center justify-center">
-                <Calendar size={20} className="text-[#6800FF]" />
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 lg:p-6 mb-5 shadow-sm">
+          <div className="flex flex-col lg:flex-row lg:items-center gap-5">
+            <div className="flex items-center gap-4 min-w-0 flex-1">
+              <ClientLogo name={user.name} size={56} />
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Welcome back</p>
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight truncate mt-0.5">{user.name}</h1>
+                <p className="text-xs text-slate-500 mt-0.5">{meetings.length} total meetings recorded on your portal</p>
               </div>
-              <p className="text-sm font-semibold text-slate-500">This Month</p>
             </div>
-            <p className="text-3xl font-bold text-slate-900">{thisMonthMeetings.length}</p>
-            <p className="text-xs text-slate-400 mt-1">{currentMonth} {currentYear}</p>
-          </div>
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
-                <CheckCircle2 size={20} className="text-emerald-500" />
+            <div className="grid grid-cols-4 gap-3 lg:gap-5 shrink-0 lg:border-l border-slate-100 lg:pl-6">
+              <div className="text-center lg:text-left">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">This month</p>
+                <p className="text-2xl font-bold text-slate-900 tabular-nums mt-0.5">{thisMonthMeetings.length}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">{currentMonth.slice(0, 3)} {currentYear}</p>
               </div>
-              <p className="text-sm font-semibold text-slate-500">Completed</p>
-            </div>
-            <p className="text-3xl font-bold text-slate-900">{meetings.filter((m) => m.meetingStatus === "done").length}</p>
-            <p className="text-xs text-slate-400 mt-1">All time</p>
-          </div>
-          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
-                <Clock size={20} className="text-blue-500" />
+              <div className="text-center lg:text-left">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Completed</p>
+                <p className="text-2xl font-bold text-emerald-600 tabular-nums mt-0.5">{doneCount}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">All time</p>
               </div>
-              <p className="text-sm font-semibold text-slate-500">Total Meetings</p>
+              <div className="text-center lg:text-left">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Scheduled</p>
+                <p className="text-2xl font-bold text-amber-600 tabular-nums mt-0.5">{scheduledCount}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Upcoming</p>
+              </div>
+              <div className="text-center lg:text-left">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Pipeline</p>
+                <p className="text-2xl font-bold text-indigo-600 tabular-nums mt-0.5">{pipelineCount}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">In progress</p>
+              </div>
             </div>
-            <p className="text-3xl font-bold text-slate-900">{meetings.length}</p>
-            <p className="text-xs text-slate-400 mt-1">Overall</p>
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="px-6 py-5 border-b border-slate-100">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-              <h2 className="text-lg font-bold text-slate-900 shrink-0">All Meetings</h2>
-              <div className="flex-1 flex flex-wrap items-center gap-2">
-                <div className="relative flex-1 min-w-48">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <div className="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-200">
+            <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <div className="flex items-center gap-2 shrink-0">
+                <h2 className="text-base font-bold text-slate-900">All meetings</h2>
+                <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md tabular-nums">{filtered.length}</span>
+              </div>
+              <div className="flex-1 flex flex-wrap items-center gap-2 md:justify-end">
+                <div className="relative flex-1 md:flex-none md:w-64">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                  <input type="text" placeholder="Search company, contact, or ID..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#6800FF]" />
+                  <input type="text" placeholder="Search company, contact, or ID..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10" />
                 </div>
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#6800FF]">
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10">
                   <option value="all">All Status</option>
                   <option value="done">Completed</option>
                   <option value="scheduled">Scheduled</option>
                   <option value="pipeline">Pipeline</option>
                 </select>
-                <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#6800FF]">
+                <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10">
                   <option value="all">All Months</option>
                   {months.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
@@ -197,59 +332,199 @@ export default function ClientPortal() {
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-16">
+            <div className="flex items-center justify-center py-20">
               <Loader2 size={24} className="text-[#6800FF] animate-spin" />
             </div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-16">
-              <Calendar size={40} className="text-slate-200 mx-auto mb-3" />
-              <p className="text-sm text-slate-400">No meetings found</p>
+            <div className="text-center py-20">
+              <div className="w-14 h-14 rounded-full bg-slate-100 mx-auto mb-3 flex items-center justify-center">
+                <Calendar size={22} className="text-slate-400" />
+              </div>
+              <p className="text-sm font-semibold text-slate-700">No meetings found</p>
+              <p className="text-xs text-slate-400 mt-1">{search || statusFilter !== "all" || monthFilter !== "all" ? "Try adjusting your filters" : "Meetings will appear here once scheduled"}</p>
             </div>
           ) : (
-            <div className="divide-y divide-slate-100">
-              {filtered.map((m) => {
-                const st = statusStyle[m.meetingStatus] || statusStyle.pipeline;
-                const rm = remarks[m.meetingId];
-                const hasRemark = !!rm?.remark;
+            <div>
+              {monthGroupKeys.map((monthKey) => {
+                const group = groupedByMonth[monthKey];
                 return (
-                  <button key={m.id} onClick={() => openMeeting(m)} className="w-full px-6 py-4 flex items-center gap-4 text-left hover:bg-slate-50 transition-colors group">
-                    <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-sm font-bold text-slate-500 shrink-0 group-hover:bg-[#6800FF]/10 group-hover:text-[#6800FF] transition-colors">
-                      {m.meetingId.split("-")[1]}
+                  <div key={monthKey}>
+                    <div className="px-6 py-2.5 bg-slate-50 border-y border-slate-100 flex items-center justify-between sticky top-[61px] z-10">
+                      <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">{monthKey}</p>
+                      <p className="text-[11px] font-semibold text-slate-500 tabular-nums">{group.length} meeting{group.length !== 1 ? "s" : ""}</p>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-slate-900 truncate">{m.companyName}</p>
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${st.bg} ${st.text}`}>{st.label}</span>
-                        {hasRemark && (
-                          <span className="flex items-center gap-1 text-[10px] text-[#6800FF] bg-[#6800FF]/5 px-2 py-0.5 rounded-full shrink-0">
-                            <MessageSquare size={9} /> Remark
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-500 mt-0.5 truncate">
-                        {m.contactName} · {m.contactTitle}
-                      </p>
+                    <div className="divide-y divide-slate-100">
+                      {group.map((m) => {
+                        const st = statusStyle[m.meetingStatus] || statusStyle.pipeline;
+                        const dotColor = m.meetingStatus === "done" ? "bg-emerald-500" : m.meetingStatus === "scheduled" ? "bg-blue-500" : "bg-amber-500";
+                        const rm = remarks[m.meetingId];
+                        const hasRemark = !!rm?.remark;
+                        const dateObj = m.meetingDate ? new Date(m.meetingDate) : null;
+                        const dayNum = dateObj ? dateObj.getDate() : "—";
+                        const monShort = dateObj ? dateObj.toLocaleDateString("en-US", { month: "short" }) : "";
+                        const weekday = dateObj ? dateObj.toLocaleDateString("en-US", { weekday: "short" }) : "";
+                        return (
+                          <button
+                            key={m.id}
+                            onClick={() => openMeeting(m)}
+                            className="w-full px-6 py-4 flex items-start gap-4 text-left hover:bg-slate-50 transition-colors group"
+                          >
+                            <div className="flex flex-col items-center justify-center w-12 shrink-0 rounded-xl border border-slate-200 bg-white py-1.5 group-hover:border-[#6800FF]/40 transition-colors">
+                              <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider">{monShort}</span>
+                              <span className="text-lg font-bold text-slate-900 leading-none tabular-nums my-0.5">{dayNum}</span>
+                              <span className="text-[9px] font-medium text-slate-400 uppercase">{weekday}</span>
+                            </div>
+                            <div className="flex-1 min-w-0 pt-0.5">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-sm font-bold text-slate-900 truncate">{m.companyName}</p>
+                                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md ${st.bg} ${st.text}`}>
+                                  <span className={`w-1 h-1 rounded-full ${dotColor}`} />
+                                  {st.label}
+                                </span>
+                                {hasRemark && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#6800FF] bg-[#6800FF]/5 border border-[#6800FF]/10 px-2 py-0.5 rounded-md">
+                                    <MessageSquare size={9} /> Remark
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-slate-600 mt-1 truncate">
+                                {m.contactName}{m.contactTitle ? <span className="text-slate-400"> · {m.contactTitle}</span> : null}
+                              </p>
+                              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                                <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 tabular-nums">
+                                  <Clock size={10} className="text-slate-400" /> {m.meetingTime || "—"}
+                                </span>
+                                <span className="font-mono text-[10px] text-slate-400">{m.meetingId}</span>
+                                {hasRemark && rm && (
+                                  <span className="text-[10px] text-slate-400">Updated {fmtRelative(rm.updatedAt)}</span>
+                                )}
+                              </div>
+                            </div>
+                            {m.meetingLink && (
+                              <span className="shrink-0 hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-[#6800FF] bg-[#6800FF]/5 px-2.5 py-1 rounded-md group-hover:bg-[#6800FF]/10 transition-colors">
+                                <Video size={11} /> Join
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
-                    <div className="text-right shrink-0 hidden sm:block">
-                      <p className="text-sm font-medium text-slate-700">{fmtDate(m.meetingDate)}</p>
-                      <p className="text-xs text-slate-400">{m.meetingTime}</p>
-                    </div>
-                    {hasRemark && rm && (
-                      <div className="text-right shrink-0 hidden md:block">
-                        <p className="text-[10px] text-slate-400">{fmtRelative(rm.updatedAt)}</p>
-                      </div>
-                    )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
           )}
 
           {meetingsWithRemarks.length > 0 && (
-            <div className="px-6 py-3 bg-slate-50 border-t border-slate-100 text-xs text-slate-400">
-              {meetingsWithRemarks.length} meeting{meetingsWithRemarks.length !== 1 ? "s" : ""} with remarks
+            <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex items-center gap-2">
+              <MessageSquare size={11} />
+              {meetingsWithRemarks.length} meeting{meetingsWithRemarks.length !== 1 ? "s" : ""} with your remarks
             </div>
           )}
+        </div>
+
+        <aside className="space-y-5">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Calendar size={14} className="text-[#6800FF]" />
+                Upcoming meetings
+              </h3>
+              <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md tabular-nums">{upcomingMeetings.length}</span>
+            </div>
+            {upcomingMeetings.length === 0 ? (
+              <div className="px-5 py-8 text-center">
+                <p className="text-xs text-slate-400">No upcoming meetings scheduled</p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {upcomingMeetings.map((m) => {
+                  const d = m.meetingDate ? new Date(m.meetingDate) : null;
+                  return (
+                    <li key={m.id}>
+                      <button onClick={() => openMeeting(m)} className="w-full px-5 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors text-left">
+                        <div className="flex flex-col items-center justify-center w-11 shrink-0 rounded-lg border border-slate-200 bg-white py-1">
+                          <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider">{d ? d.toLocaleDateString("en-US", { month: "short" }) : "—"}</span>
+                          <span className="text-base font-bold text-slate-900 leading-none tabular-nums my-0.5">{d ? d.getDate() : "—"}</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-bold text-slate-900 truncate">{m.companyName}</p>
+                          <p className="text-[11px] text-slate-500 truncate">{m.contactName}</p>
+                          <p className="text-[10px] text-slate-400 tabular-nums mt-0.5 inline-flex items-center gap-1">
+                            <Clock size={9} /> {m.meetingTime || "—"}
+                          </p>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <User size={14} className="text-[#6800FF]" />
+                Your Thyleads team
+              </h3>
+              <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md tabular-nums">{teamMembers.length}</span>
+            </div>
+            {teamMembers.length === 0 ? (
+              <div className="px-5 py-8 text-center">
+                <p className="text-xs text-slate-400">No team members assigned yet</p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {teamMembers.map((t) => (
+                  <li key={`${t.role}:${t.name}`} className="px-5 py-3 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#f0e6ff] to-[#e0ccff] text-[#6800FF] flex items-center justify-center text-sm font-bold shrink-0">
+                      {t.name[0]?.toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-bold text-slate-900 truncate">{t.name}</p>
+                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{t.role}</p>
+                    </div>
+                    <span className="text-[11px] text-slate-400 tabular-nums">{t.count}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <MessageSquare size={14} className="text-[#6800FF]" />
+                Recent activity
+              </h3>
+              <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md tabular-nums">{recentRemarkItems.length}</span>
+            </div>
+            {recentRemarkItems.length === 0 ? (
+              <div className="px-5 py-8 text-center">
+                <p className="text-xs text-slate-400">No remarks added yet</p>
+                <p className="text-[10px] text-slate-400 mt-1">Click any meeting to add a remark</p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {recentRemarkItems.map(({ meeting, remark }) => (
+                  <li key={meeting.id}>
+                    <button onClick={() => openMeeting(meeting)} className="w-full px-5 py-3 text-left hover:bg-slate-50 transition-colors">
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-[13px] font-bold text-slate-900 truncate">{meeting.companyName}</p>
+                        <p className="text-[10px] text-slate-400 shrink-0 ml-2">{fmtRelative(remark.updatedAt)}</p>
+                      </div>
+                      <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed">{remark.remark}</p>
+                      {remark.updatedBy && (
+                        <p className="text-[10px] text-slate-400 mt-1.5">by {remark.updatedBy}</p>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </aside>
         </div>
       </div>
 
