@@ -14,13 +14,16 @@ import {
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+// Rendering 60 animated frames on a cold Vercel function can take 10-20s.
+// The Hobby cap is 60s; Pro is higher. Set explicit budget so we don't get killed.
+export const maxDuration = 60;
 
 type Variant = "webp" | "gif" | "gif-inline";
 
 const KEY: Record<Variant, string> = {
-  "webp": "thyleads-shine-webp-v9",
-  "gif": "thyleads-shine-gif-v9",
-  "gif-inline": "thyleads-shine-gif-inline-v9",
+  "webp": "thyleads-shine-webp-v10",
+  "gif": "thyleads-shine-gif-v10",
+  "gif-inline": "thyleads-shine-gif-inline-v10",
 };
 
 interface AssetDoc {
@@ -29,10 +32,11 @@ interface AssetDoc {
 }
 
 const FONT_CANDIDATE_DIRS = [
-  // Local dev: fonts live at the repo root.
+  // Local dev / Vercel's repo root preserved via output file tracing.
   path.join(process.cwd(), "fonts"),
-  // Vercel-traced asset locations (both classic and output-tracing-include roots).
+  // Some Vercel build layouts place traced assets under the function bundle.
   path.join(process.cwd(), ".next", "server", "fonts"),
+  path.join(process.cwd(), ".next", "standalone", "fonts"),
   path.join("/var/task", "fonts"),
 ];
 
@@ -59,17 +63,15 @@ async function renderRawFrames(smooth: boolean) {
   const rawFrames: Buffer[] = [];
   for (const f of frames) {
     const svg = shineFrameSvg(f.reveal, f.shine);
-    // resvg-js — Skia-grade SVG rasterization. If we found the bundled Inter TTFs,
-    // use them exclusively; otherwise fall back to system fonts so the render never fails.
     const resvg = new Resvg(svg, {
       background: "white",
       fitTo: { mode: "width", value: SHINE_W },
       font: fontFiles.length > 0
         ? { fontFiles, loadSystemFonts: false, defaultFontFamily: "Inter" }
         : { loadSystemFonts: true, defaultFontFamily: "Inter" },
-      shapeRendering: 2, // geometricPrecision
-      textRendering: 2, // geometricPrecision
-      imageRendering: 0, // optimizeQuality
+      shapeRendering: 2,
+      textRendering: 2,
+      imageRendering: 0,
     });
     const pngBuffer = resvg.render().asPng();
     const raw = await sharp(pngBuffer)
@@ -86,12 +88,10 @@ async function renderAnimatedWebP(): Promise<Buffer> {
   const { frames, rawFrames } = await renderRawFrames(true);
   const combined = Buffer.concat(rawFrames);
   const delays = frames.map((f) => f.delay);
-  // `pageHeight` goes on the raw INPUT metadata (CreateRaw). Without it sharp treats the
-  // stacked buffer as one tall static image — that's why the animation wasn't playing.
   return sharp(combined, {
     raw: { width: SHINE_W, height: SHINE_H * frames.length, channels: 4, pageHeight: SHINE_H },
   })
-    .webp({ quality: 92, loop: 0, delay: delays, effort: 6, smartSubsample: true })
+    .webp({ quality: 92, loop: 0, delay: delays, effort: 4, smartSubsample: true })
     .toBuffer();
 }
 
@@ -107,7 +107,7 @@ async function renderAnimatedGif(compact: boolean): Promise<Buffer> {
       delay: delays,
       colours: compact ? 64 : 256,
       dither: 1.0,
-      effort: 7,
+      effort: 4,
     })
     .toBuffer();
 }
@@ -120,35 +120,60 @@ function resolveVariant(req: NextRequest): Variant {
   return "webp";
 }
 
+function debugRequested(req: NextRequest): boolean {
+  return req.nextUrl.searchParams.get("debug") === "1";
+}
+
 export async function GET(req: NextRequest) {
-  await connectDB();
   const variant = resolveVariant(req);
   const key = KEY[variant];
+  const debug = debugRequested(req);
 
-  let doc = (await SignatureAsset.findOne({ key }).lean()) as unknown as AssetDoc | null;
+  // --- 1. Try Mongo cache (best-effort; don't fail render if DB is unreachable) ----
+  let doc: AssetDoc | null = null;
+  try {
+    await connectDB();
+    doc = (await SignatureAsset.findOne({ key }).lean()) as unknown as AssetDoc | null;
+  } catch (e) {
+    if (debug) {
+      return NextResponse.json({ stage: "mongo-read", error: String(e) }, { status: 500 });
+    }
+    // Continue — we'll render fresh below.
+  }
 
+  // --- 2. Render if nothing cached --------------------------------------------------
   if (!doc || !doc.data) {
     try {
-      let bytes: Buffer;
-      let contentType: string;
-      if (variant === "webp") {
-        bytes = await renderAnimatedWebP();
-        contentType = "image/webp";
-      } else {
-        bytes = await renderAnimatedGif(variant === "gif-inline");
-        contentType = "image/gif";
-      }
-      await SignatureAsset.findOneAndUpdate(
-        { key },
-        { $set: { key, contentType, data: bytes, updatedAt: new Date() } },
-        { upsert: true, new: true }
-      );
+      const bytes = variant === "webp"
+        ? await renderAnimatedWebP()
+        : await renderAnimatedGif(variant === "gif-inline");
+      const contentType = variant === "webp" ? "image/webp" : "image/gif";
       doc = { data: bytes, contentType };
-    } catch {
-      return new NextResponse("Failed to render", { status: 500 });
+
+      // Best-effort cache write — if it fails we still have `bytes` ready to serve.
+      try {
+        await connectDB();
+        await SignatureAsset.findOneAndUpdate(
+          { key },
+          { $set: { key, contentType, data: bytes, updatedAt: new Date() } },
+          { upsert: true, new: true }
+        );
+      } catch {}
+    } catch (e) {
+      if (debug) {
+        return NextResponse.json({
+          stage: "render",
+          variant,
+          cwd: process.cwd(),
+          error: String(e),
+          stack: e instanceof Error ? e.stack : undefined,
+        }, { status: 500 });
+      }
+      return new NextResponse(`Failed to render: ${e instanceof Error ? e.message : "unknown"}`, { status: 500 });
     }
   }
 
+  // --- 3. Serve bytes ---------------------------------------------------------------
   return new NextResponse(Uint8Array.from(doc.data), {
     status: 200,
     headers: {
