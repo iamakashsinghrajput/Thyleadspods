@@ -32,12 +32,35 @@ function isPublicOrigin(origin: string): boolean {
   }
 }
 
+async function fetchInlineShineDataUri(): Promise<string | undefined> {
+  if (cachedShineGif) return cachedShineGif;
+  try {
+    // sharp-rendered, dithered, compact animated GIF — far nicer than gifenc's inline fallback.
+    const res = await fetch(`${SHINE_ASSET_PATH}?format=gif&inline=1`, { cache: "force-cache" });
+    if (!res.ok) throw new Error("server render failed");
+    const buf = await res.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    // Guard against a render too big for Gmail's signature cap.
+    if (bytes.length > 8 * 1024) throw new Error("too large to inline");
+    let binary = "";
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    cachedShineGif = `data:image/gif;base64,${btoa(binary)}`;
+    return cachedShineGif;
+  } catch {
+    // Last-resort: client-side gifenc GIF (low quality but guaranteed to fit).
+    return buildShineGifDataUri().catch(() => undefined);
+  }
+}
+
 async function resolveShineSrc(): Promise<string | undefined> {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   if (isPublicOrigin(origin)) {
     return `${origin}${SHINE_ASSET_PATH}`;
   }
-  return buildShineGifDataUri().catch(() => undefined);
+  return fetchInlineShineDataUri();
 }
 
 async function rasterizeSvgToImageData(svg: string, w: number, h: number): Promise<Uint8ClampedArray> {
@@ -328,14 +351,15 @@ export default function Signature() {
 
   useEffect(() => {
     if (!user) return;
-    // Prebuild the logo PNG so Copy is instant; on localhost also prebuild the inline GIF fallback.
+    // Prebuild the logo PNG so Copy is instant.
     void buildLogoPngDataUri().catch(() => {});
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     if (isPublicOrigin(origin)) {
-      // Warm the server cache so Gmail's first fetch is instant.
+      // Warm the hi-quality hosted WebP so Gmail's first fetch is instant.
       void fetch(`${origin}${SHINE_ASSET_PATH}`, { method: "GET", cache: "no-store" }).catch(() => {});
     } else {
-      void buildShineGifDataUri().catch(() => {});
+      // On localhost, pre-fetch the sharp-rendered compact GIF for inline embed.
+      void fetchInlineShineDataUri().catch(() => {});
     }
   }, [user]);
 
@@ -606,17 +630,25 @@ export default function Signature() {
               : "Copy and use signatures shared with you."}
           </p>
         </div>
-        {isSuperadmin && (
-          <button
-            onClick={() => {
-              setForm(BLANK_FORM);
-              setShowForm(true);
-            }}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#6800FF] hover:bg-[#5800DD] text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+        <div className="flex items-center gap-2">
+          <a
+            href="/signatures/preview-in-gmail"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg transition-colors"
           >
-            <Plus size={15} /> New Signature
-          </button>
-        )}
+            Preview in Gmail →
+          </a>
+          {isSuperadmin && (
+            <button
+              onClick={() => {
+                setForm(BLANK_FORM);
+                setShowForm(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#6800FF] hover:bg-[#5800DD] text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+            >
+              <Plus size={15} /> New Signature
+            </button>
+          )}
+        </div>
       </div>
 
       {isSuperadmin && showForm && (

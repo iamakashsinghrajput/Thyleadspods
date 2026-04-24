@@ -33,11 +33,10 @@ export function shineFrameSvg(reveal: number, shine: number): string {
     `</linearGradient>` +
     `<clipPath id="rev"><rect x="0" y="0" width="${clipW}" height="${SHINE_H}"/></clipPath>` +
     `</defs>` +
-    // text-anchor="start" at x=0 so the "T" sits flush with the left edge of the image — no dead space
-    // between the divider and the wordmark. font-weight is dropped to 700 because sharp/librsvg fall back
-    // to Helvetica (Inter isn't installed on the image-processing side) which renders visually heavier
-    // at the same weight number. 700 here matches the portal's font-extrabold Inter render.
-    `<text clip-path="url(#rev)" x="0" y="${Math.round(SHINE_H * 0.74)}" font-family="Inter, 'Helvetica Neue', Arial, sans-serif" font-size="${SHINE_FONT_SIZE}" font-weight="700" letter-spacing="0.22" fill="url(#g)" text-anchor="start">Thyleads</text>` +
+    // text-anchor="start" at x=0 so the "T" sits flush with the left edge — no dead space.
+    // font-weight 800 is the real portal weight; resvg now ships Inter so we don't need to
+    // compensate for a heavier Helvetica fallback like before.
+    `<text clip-path="url(#rev)" x="0" y="${Math.round(SHINE_H * 0.74)}" font-family="Inter" font-size="${SHINE_FONT_SIZE}" font-weight="800" letter-spacing="0.22" fill="url(#g)" text-anchor="start">Thyleads</text>` +
     `</svg>`;
 }
 
