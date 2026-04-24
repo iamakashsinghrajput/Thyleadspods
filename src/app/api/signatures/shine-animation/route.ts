@@ -21,14 +21,34 @@ export const maxDuration = 60;
 type Variant = "webp" | "gif" | "gif-inline";
 
 const KEY: Record<Variant, string> = {
-  "webp": "thyleads-shine-webp-v12-alpha",
-  "gif": "thyleads-shine-gif-v12-alpha",
-  "gif-inline": "thyleads-shine-gif-inline-v12-alpha",
+  "webp": "thyleads-shine-webp-v13",
+  "gif": "thyleads-shine-gif-v13",
+  "gif-inline": "thyleads-shine-gif-inline-v13",
 };
 
 interface AssetDoc {
   data: Buffer;
   contentType?: string;
+}
+
+/**
+ * Mongoose's .lean() on a Buffer field can come back in several shapes depending on the
+ * bson/mongoose version: a real Node Buffer, a Uint8Array, a BSON Binary (with .buffer),
+ * or a plain `{ type: "Buffer", data: number[] }` JSON form. Normalize into a Uint8Array.
+ */
+function toBytes(raw: unknown): Uint8Array {
+  if (raw instanceof Uint8Array) return raw;
+  if (Buffer.isBuffer(raw)) return new Uint8Array(raw);
+  if (raw && typeof raw === "object") {
+    const o = raw as { buffer?: unknown; data?: unknown };
+    if (o.buffer) {
+      if (o.buffer instanceof Uint8Array) return o.buffer as Uint8Array;
+      if (Buffer.isBuffer(o.buffer)) return new Uint8Array(o.buffer);
+      if (o.buffer instanceof ArrayBuffer) return new Uint8Array(o.buffer);
+    }
+    if (Array.isArray(o.data)) return Uint8Array.from(o.data as number[]);
+  }
+  return new Uint8Array();
 }
 
 const FONT_CANDIDATE_DIRS = [
@@ -181,7 +201,7 @@ export async function GET(req: NextRequest) {
     try {
       await connectDB();
       const existing = await SignatureAsset.findOne({ key }).lean();
-      mongoStatus = existing ? `cached, ${(existing as unknown as AssetDoc).data?.length ?? "?"} bytes` : "no cached row";
+      mongoStatus = existing ? `cached, ${toBytes((existing as unknown as AssetDoc).data).length} usable bytes` : "no cached row";
     } catch (e) {
       mongoStatus = `error: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -239,7 +259,7 @@ export async function GET(req: NextRequest) {
   }
 
   // --- 3. Serve bytes ---------------------------------------------------------------
-  return new NextResponse(Uint8Array.from(doc.data), {
+  return new NextResponse(Buffer.from(toBytes(doc.data)), {
     status: 200,
     headers: {
       "Content-Type": doc.contentType || "image/webp",
