@@ -52,15 +52,18 @@ function buildSchedule({
   shineMs: number;
   restMs: number;
 }): ShineFrame[] {
+  // Frame 0 is a "safety" frame with text fully revealed. If a Gmail client strips the
+  // animation and freezes on the first frame, the recipient still sees the full wordmark
+  // instead of a blank reveal=0 rectangle. The loop then plays reveal → hold → shine.
   const revealSteps = Array.from({ length: revealCount }, (_, i) =>
     easeInOutCubic((i + 1) / revealCount)
   );
-  const lastReveal = revealSteps[revealSteps.length - 1];
   return [
-    ...revealSteps.map<ShineFrame>((r) => ({
+    { reveal: 1, shine: 0, delay: 20 },
+    ...revealSteps.map<ShineFrame>((r, i) => ({
       reveal: r,
       shine: 0,
-      delay: r === lastReveal ? holdMs : revealMs,
+      delay: i === revealSteps.length - 1 ? holdMs : revealMs,
     })),
     ...Array.from({ length: shineCount }, (_, i) => {
       const p = (i + 1) / (shineCount + 1);
@@ -73,25 +76,25 @@ function buildSchedule({
 // Compact schedule — used for the inline GIF data URI so it fits under Gmail's ~10 KB signature cap.
 export function buildShineFramesCompact(): ShineFrame[] {
   return buildSchedule({
-    revealCount: 8,
-    revealMs: 55,
-    holdMs: 900,
-    shineCount: 18,
-    shineMs: 45,
-    restMs: 2200,
+    revealCount: 18,
+    revealMs: 60,
+    holdMs: 1100,
+    shineCount: 36,
+    shineMs: 50,
+    restMs: 2800,
   });
 }
 
 // Smooth schedule — used for the server-rendered animated WebP. No inline size limit so we can
-// push to ~30 fps motion which reads as portal-level smoothness in Gmail.
+// push to ~60 fps motion for portal-level buttery smoothness in Gmail.
 export function buildShineFramesSmooth(): ShineFrame[] {
   return buildSchedule({
-    revealCount: 18,
-    revealMs: 36,
-    holdMs: 900,
-    shineCount: 40,
+    revealCount: 48,
+    revealMs: 35,
+    holdMs: 1200,
+    shineCount: 96,
     shineMs: 28,
-    restMs: 2200,
+    restMs: 3000,
   });
 }
 
