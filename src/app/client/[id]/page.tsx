@@ -17,6 +17,8 @@ const MONTH_OPTIONS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+const GEO_OPTIONS = ["India", "US", "UK", "UAE", "Canada", "Australia", "APAC", "EMEA", "Global"];
+
 const contactCols = [
   { label: "Meeting ID", short: "ID", bp: 100, w: 110 },
   { label: "Month", short: "Mon", bp: 90, w: 100 },
@@ -24,7 +26,7 @@ const contactCols = [
   { label: "Meeting Time", short: "Time", bp: 120, w: 120 },
   { label: "Company Name", short: "Company", bp: 130, w: 150 },
   { label: "Geo", short: "Geo", bp: 80, w: 90 },
-  { label: "Sales Rep", short: "Rep", bp: 110, w: 130 },
+  { label: "Thyleads Rep", short: "Rep", bp: 110, w: 140 },
   { label: "Account Manager", short: "AM", bp: 130, w: 140 },
   { label: "Meeting Status", short: "Status", bp: 120, w: 120 },
   { label: "Meeting Link", short: "Link", bp: 100, w: 100 },
@@ -73,7 +75,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const { id } = use(params);
   const router = useRouter();
   const { user } = useAuth();
-  const { podMap } = usePods();
+  const { pods, podMap } = usePods();
   const { projects, details, addDetail, updateDetail, deleteDetail, metrics, addMetric, updateMetric, deleteMetric } = useData();
   const { addNotification } = useNotifications();
 
@@ -91,7 +93,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [showDetailForm, setShowDetailForm] = useState(false);
   const [editingDetailId, setEditingDetailId] = useState<string | null>(null);
   const [detailForm, setDetailForm] = useState({
-    month: "", year: "", geo: "", salesRep: "",
+    month: "", year: "", geo: "India", salesRep: "",
     meetingDate: "", meetingTime: "", meetingStatus: "scheduled" as MeetingStatus, meetingLink: "",
     companyName: "", contactName: "", contactTitle: "", contactEmail: "", contactNumber: "",
   });
@@ -138,7 +140,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   }, [records, search, monthFilter]);
 
   function resetDetailForm() {
-    setDetailForm({ month: "", year: "", geo: "", salesRep: "", meetingDate: "", meetingTime: "", meetingStatus: "scheduled" as MeetingStatus, meetingLink: "", companyName: "", contactName: "", contactTitle: "", contactEmail: "", contactNumber: "" });
+    setDetailForm({ month: "", year: "", geo: "India", salesRep: "", meetingDate: "", meetingTime: "", meetingStatus: "scheduled" as MeetingStatus, meetingLink: "", companyName: "", contactName: "", contactTitle: "", contactEmail: "", contactNumber: "" });
     setShowDetailForm(false);
     setEditingDetailId(null);
   }
@@ -235,7 +237,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   }
 
   function exportMeetings() {
-    const headers = ["Meeting ID", "Month", "Year", "Client Name", "Geo", "Sales Rep", "Account Manager", "Meeting Date", "Meeting Time", "Meeting Status", "Meeting Link", "Company Name", "Contact Name", "Contact Title", "Contact Email", "Contact Number", "Remarks", "Additional Info", "Meeting Summary"];
+    const headers = ["Meeting ID", "Month", "Year", "Client Name", "Geo", "Thyleads Rep", "Account Manager", "Meeting Date", "Meeting Time", "Meeting Status", "Meeting Link", "Company Name", "Contact Name", "Contact Title", "Contact Email", "Contact Number", "Remarks", "Additional Info", "Meeting Summary"];
     const rows = filtered.map((r) => [
       r.meetingId, r.month, String(r.year), r.clientName, r.geo, r.salesRep, r.accountManager || "", r.meetingDate, r.meetingTime, r.meetingStatus, r.meetingLink, r.companyName, r.contactName, r.contactTitle, r.contactEmail, r.contactNumber, r.remarks || "", r.additionalInfo || "", r.meetingSummary || "",
     ]);
@@ -318,8 +320,20 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     return Array.from(years).sort((a, b) => b - a).map((y) => <option key={y} value={String(y)}>{y}</option>);
                   })()}
                 </select>
-                <input placeholder="Geo" value={detailForm.geo} onChange={(e) => setDetailForm({ ...detailForm, geo: e.target.value })} className={inputClass} />
-                <input placeholder="Sales Rep" value={detailForm.salesRep} onChange={(e) => setDetailForm({ ...detailForm, salesRep: e.target.value })} className={inputClass} />
+                <select value={detailForm.geo} onChange={(e) => setDetailForm({ ...detailForm, geo: e.target.value })} className={inputClass}>
+                  {GEO_OPTIONS.map((g) => <option key={g} value={g}>{g}</option>)}
+                </select>
+                <select value={detailForm.salesRep} onChange={(e) => setDetailForm({ ...detailForm, salesRep: e.target.value })} className={inputClass}>
+                  <option value="">Select Thyleads Rep</option>
+                  {pods.map((pod) => (
+                    <optgroup key={pod.id} label={pod.name}>
+                      {pod.members.map((m) => <option key={`${pod.id}:${m}`} value={m}>{m}</option>)}
+                    </optgroup>
+                  ))}
+                  {detailForm.salesRep && !pods.some((p) => p.members.includes(detailForm.salesRep)) && (
+                    <option value={detailForm.salesRep}>{detailForm.salesRep} (legacy)</option>
+                  )}
+                </select>
                 <input type="date" value={detailForm.meetingDate} onChange={(e) => setDetailForm({ ...detailForm, meetingDate: e.target.value })} className={inputClass} />
                 <input type="time" value={detailForm.meetingTime} onChange={(e) => setDetailForm({ ...detailForm, meetingTime: e.target.value })} className={inputClass} />
                 <select value={detailForm.meetingStatus} onChange={(e) => setDetailForm({ ...detailForm, meetingStatus: e.target.value as MeetingStatus })} className={inputClass}>
@@ -567,7 +581,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   <p className="text-sm text-slate-800">{viewMeeting.geo}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sales Rep</p>
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Thyleads Rep</p>
                   <p className="text-sm text-slate-800">{viewMeeting.salesRep}</p>
                 </div>
                 <div>
