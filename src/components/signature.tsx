@@ -40,10 +40,29 @@ async function fetchInlineShineDataUri(): Promise<string | undefined> {
   }
 }
 
-// Always embed inline. The hosted-URL path had too many failure modes (Vercel cold start,
-// font bundling, native bindings, Gmail image-proxy caching of broken frames). An inline
-// data URI works identically on localhost, Vercel, Gmail web, Gmail mobile — everywhere.
+function isPublicOrigin(origin: string): boolean {
+  if (!origin) return false;
+  try {
+    const u = new URL(origin);
+    const host = u.hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return false;
+    if (/^10\./.test(host)) return false;
+    if (/^192\.168\./.test(host)) return false;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// On a publicly-reachable origin we reference the hosted URL directly — Gmail's image
+// proxy fetches it, signature HTML stays tiny, animation quality is the full-res WebP.
+// On localhost / private networks we embed the GIF inline (Gmail's proxy can't reach localhost).
 async function resolveShineSrc(): Promise<string | undefined> {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  if (isPublicOrigin(origin)) {
+    return `${origin}${SHINE_ASSET_PATH}`;
+  }
   return fetchInlineShineDataUri();
 }
 
@@ -335,9 +354,16 @@ export default function Signature() {
 
   useEffect(() => {
     if (!user) return;
-    // Prebuild both embeds so the first Copy click is instant.
+    // Prebuild the logo PNG so Copy is instant.
     void buildLogoPngDataUri().catch(() => {});
-    void fetchInlineShineDataUri().catch(() => {});
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    if (isPublicOrigin(origin)) {
+      // Warm the hosted WebP so Gmail's first fetch through its image proxy is fast.
+      void fetch(`${origin}${SHINE_ASSET_PATH}`, { method: "GET", cache: "no-store" }).catch(() => {});
+    } else {
+      // On localhost, pre-fetch the compact GIF and cache its base64 data URI.
+      void fetchInlineShineDataUri().catch(() => {});
+    }
   }, [user]);
 
   if (!user) return null;
