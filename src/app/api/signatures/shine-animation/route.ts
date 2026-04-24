@@ -18,9 +18,9 @@ export const runtime = "nodejs";
 type Variant = "webp" | "gif" | "gif-inline";
 
 const KEY: Record<Variant, string> = {
-  "webp": "thyleads-shine-webp-v8",
-  "gif": "thyleads-shine-gif-v8",
-  "gif-inline": "thyleads-shine-gif-inline-v8",
+  "webp": "thyleads-shine-webp-v9",
+  "gif": "thyleads-shine-gif-v9",
+  "gif-inline": "thyleads-shine-gif-inline-v9",
 };
 
 interface AssetDoc {
@@ -86,9 +86,10 @@ async function renderAnimatedWebP(): Promise<Buffer> {
   const { frames, rawFrames } = await renderRawFrames(true);
   const combined = Buffer.concat(rawFrames);
   const delays = frames.map((f) => f.delay);
+  // `pageHeight` goes on the raw INPUT metadata (CreateRaw). Without it sharp treats the
+  // stacked buffer as one tall static image — that's why the animation wasn't playing.
   return sharp(combined, {
-    raw: { width: SHINE_W, height: SHINE_H * frames.length, channels: 4 },
-    pages: frames.length,
+    raw: { width: SHINE_W, height: SHINE_H * frames.length, channels: 4, pageHeight: SHINE_H },
   })
     .webp({ quality: 92, loop: 0, delay: delays, effort: 6, smartSubsample: true })
     .toBuffer();
@@ -99,8 +100,7 @@ async function renderAnimatedGif(compact: boolean): Promise<Buffer> {
   const combined = Buffer.concat(rawFrames);
   const delays = frames.map((f) => f.delay);
   return sharp(combined, {
-    raw: { width: SHINE_W, height: SHINE_H * frames.length, channels: 4 },
-    pages: frames.length,
+    raw: { width: SHINE_W, height: SHINE_H * frames.length, channels: 4, pageHeight: SHINE_H },
   })
     .gif({
       loop: 0,

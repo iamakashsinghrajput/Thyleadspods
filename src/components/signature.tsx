@@ -234,10 +234,10 @@ function ThyMarkSvg({ className = "", fill = "#ffffff" }: { className?: string; 
 
 function BrandLogo() {
   return (
-    <div className="shrink-0 flex items-center justify-center sm:justify-start gap-2 py-2 sm:py-0">
-      <ThyMarkSvg className="w-7 h-7 shrink-0" fill="#6800FF" />
-      <span className="text-slate-300 text-2xl font-light leading-none select-none">|</span>
-      <span className="thy-brand-text text-[22px] font-extrabold tracking-[0.01em] leading-none">Thyleads</span>
+    <div className="shrink-0 flex items-center justify-start gap-1.5 sm:gap-2">
+      <ThyMarkSvg className="w-5 h-5 sm:w-7 sm:h-7 shrink-0" fill="#6800FF" />
+      <span className="text-slate-300 text-lg sm:text-2xl font-light leading-none select-none">|</span>
+      <span className="thy-brand-text text-[15px] sm:text-[22px] font-extrabold tracking-[0.01em] leading-none">Thyleads</span>
     </div>
   );
 }
@@ -275,18 +275,18 @@ function renderSignatureHtml(sig: SignatureDoc, logoSrc?: string, shineSrc?: str
 
 function SignatureCard({ sig }: { sig: SignatureDoc }) {
   return (
-    <div className="bg-white px-4 sm:px-6 py-4 sm:py-5 rounded-2xl shadow-md shadow-[#6800FF]/10 border border-slate-100 font-[Inter,sans-serif] w-full max-w-xl">
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5 w-full">
+    <div className="bg-white px-2.5 py-2 sm:px-6 sm:py-5 rounded-xl sm:rounded-2xl shadow-md shadow-[#6800FF]/10 border border-slate-100 font-[Inter,sans-serif] w-full max-w-xl">
+      <div className="flex items-center gap-2 sm:gap-5 w-full">
         <BrandLogo />
 
-        <div className="h-px sm:h-auto sm:w-px w-full sm:self-stretch bg-slate-200" aria-hidden />
+        <div className="w-px self-stretch bg-slate-200" aria-hidden />
 
-        <div className="flex flex-col min-w-0 flex-1 text-center sm:text-left">
-          <h1 className="text-[20px] sm:text-[22px] font-bold text-[#6800FF] leading-tight truncate">{sig.personName || "Full name"}</h1>
-          {sig.position && <h2 className="text-[13px] sm:text-[15px] font-semibold text-slate-800 mt-1 truncate">{sig.position}</h2>}
-          {sig.phone && <p className="text-[13px] text-slate-500 mt-2 tracking-wide">{sig.phone}</p>}
+        <div className="flex flex-col min-w-0 flex-1 text-left">
+          <h1 className="text-[15px] sm:text-[22px] font-bold text-[#6800FF] leading-tight truncate">{sig.personName || "Full name"}</h1>
+          {sig.position && <h2 className="text-[10px] sm:text-[15px] font-semibold text-slate-800 mt-0.5 sm:mt-1 truncate leading-tight">{sig.position}</h2>}
+          {sig.phone && <p className="text-[10px] sm:text-[13px] text-slate-500 mt-0.5 sm:mt-2 tracking-wide">{sig.phone}</p>}
           {(sig.linkedInUrl || sig.websiteUrl) && (
-            <div className="mt-1.5 text-[13px] font-semibold flex flex-wrap gap-x-1.5 justify-center sm:justify-start">
+            <div className="mt-0.5 sm:mt-1.5 text-[10px] sm:text-[13px] font-semibold flex flex-wrap gap-x-1 sm:gap-x-1.5 justify-start">
               {sig.linkedInUrl && (
                 <a href={sig.linkedInUrl} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-[#6800FF] transition-colors underline decoration-1 underline-offset-2">
                   Linkedin

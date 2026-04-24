@@ -99,7 +99,8 @@ export default function PreviewInGmailPage() {
     // Ask the signature component's html builder to give us the exact HTML that would be copied.
     // Easiest path: call the server-rendered animation URL directly so Gmail fetches bytes.
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const shineSrc = `${origin}/api/signatures/shine-animation`;
+    // Cache-bust on each Reload so the iframe fetches the freshly-rendered animation.
+    const shineSrc = `${origin}/api/signatures/shine-animation?t=${refreshKey}`;
     // Inline logo PNG (tiny, always embedded).
     const size = 28;
     const logoSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 78 78"><path d="M33.54 78V20.0792H12.48V10.8119H67.86V27.0297H78V0H0V30.8911H21.84V78H33.54Z" fill="#6800FF"/><path d="M55.38 20.0792H43.68V78H78V68.7327H55.38V20.0792Z" fill="#6800FF"/></svg>`;
@@ -127,7 +128,7 @@ export default function PreviewInGmailPage() {
 </table>`;
 
     setRenderedHtml(buildGmailFrameHtml(sig, surface));
-  }, [selected, surface]);
+  }, [selected, surface, refreshKey]);
 
   useEffect(() => {
     let ignore = false;
