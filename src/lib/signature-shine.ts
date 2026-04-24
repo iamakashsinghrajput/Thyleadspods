@@ -20,7 +20,6 @@ export function shineFrameSvg(reveal: number, shine: number): string {
   const clipW = Math.max(0, Math.min(SHINE_W, Math.round(SHINE_W * reveal)));
   // The portal uses font-extrabold (800). Matching that here keeps stroke weights consistent.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SHINE_W}" height="${SHINE_H}" viewBox="0 0 ${SHINE_W} ${SHINE_H}">` +
-    `<rect width="100%" height="100%" fill="#ffffff"/>` +
     `<defs>` +
     `<linearGradient id="g" x1="${x1}%" y1="0" x2="${x2}%" y2="0">` +
     `<stop offset="0" stop-color="#0f172a"/>` +

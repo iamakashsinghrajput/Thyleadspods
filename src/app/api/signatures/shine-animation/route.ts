@@ -21,9 +21,9 @@ export const maxDuration = 60;
 type Variant = "webp" | "gif" | "gif-inline";
 
 const KEY: Record<Variant, string> = {
-  "webp": "thyleads-shine-webp-v10",
-  "gif": "thyleads-shine-gif-v10",
-  "gif-inline": "thyleads-shine-gif-inline-v10",
+  "webp": "thyleads-shine-webp-v12-alpha",
+  "gif": "thyleads-shine-gif-v12-alpha",
+  "gif-inline": "thyleads-shine-gif-inline-v12-alpha",
 };
 
 interface AssetDoc {
@@ -63,12 +63,25 @@ async function renderRawFrames(smooth: boolean) {
   const rawFrames: Buffer[] = [];
   for (const f of frames) {
     const svg = shineFrameSvg(f.reveal, f.shine);
+    // When Inter TTFs are bundled use them; otherwise fall back to whatever sans-serif
+    // the host OS ships (DejaVu Sans on Vercel Linux) so text still rasterizes.
+    const fontOptions = fontFiles.length > 0
+      ? {
+          fontFiles,
+          loadSystemFonts: false as const,
+          defaultFontFamily: "Inter",
+          sansSerifFamily: "Inter",
+        }
+      : {
+          loadSystemFonts: true as const,
+          defaultFontFamily: "DejaVu Sans",
+          sansSerifFamily: "DejaVu Sans",
+        };
     const resvg = new Resvg(svg, {
-      background: "white",
+      // No explicit background — alpha 0 outside the text glyphs so the animation
+      // composites cleanly onto whatever background the signature sits on.
       fitTo: { mode: "width", value: SHINE_W },
-      font: fontFiles.length > 0
-        ? { fontFiles, loadSystemFonts: false, defaultFontFamily: "Inter" }
-        : { loadSystemFonts: true, defaultFontFamily: "Inter" },
+      font: fontOptions,
       shapeRendering: 2,
       textRendering: 2,
       imageRendering: 0,
@@ -124,20 +137,72 @@ function debugRequested(req: NextRequest): boolean {
   return req.nextUrl.searchParams.get("debug") === "1";
 }
 
+async function collectDiagnostics(variant: Variant, key: string) {
+  const { readdir, stat } = await import("fs/promises");
+  const listing: Record<string, string[] | string> = {};
+  for (const dir of [process.cwd(), ...FONT_CANDIDATE_DIRS]) {
+    try {
+      const entries = await readdir(dir);
+      listing[dir] = entries;
+    } catch (e) {
+      listing[dir] = `<unreadable: ${e instanceof Error ? e.message : String(e)}>`;
+    }
+  }
+  const fontFiles = await resolveFontFiles();
+  const fontStats: Record<string, number | string> = {};
+  for (const f of fontFiles) {
+    try {
+      const s = await stat(f);
+      fontStats[f] = s.size;
+    } catch (e) {
+      fontStats[f] = `<stat failed: ${e instanceof Error ? e.message : String(e)}>`;
+    }
+  }
+  return {
+    variant,
+    key,
+    cwd: process.cwd(),
+    env: process.env.VERCEL ? "vercel" : "local",
+    vercelRegion: process.env.VERCEL_REGION || null,
+    fontFilesResolved: fontFiles,
+    fontStats,
+    listing,
+  };
+}
+
 export async function GET(req: NextRequest) {
   const variant = resolveVariant(req);
   const key = KEY[variant];
   const debug = debugRequested(req);
+
+  if (debug) {
+    const diag = await collectDiagnostics(variant, key);
+    let mongoStatus: string;
+    try {
+      await connectDB();
+      const existing = await SignatureAsset.findOne({ key }).lean();
+      mongoStatus = existing ? `cached, ${(existing as unknown as AssetDoc).data?.length ?? "?"} bytes` : "no cached row";
+    } catch (e) {
+      mongoStatus = `error: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    let renderPreview: string | null = null;
+    try {
+      const bytes = variant === "webp"
+        ? await renderAnimatedWebP()
+        : await renderAnimatedGif(variant === "gif-inline");
+      renderPreview = `rendered ok, ${bytes.length} bytes`;
+    } catch (e) {
+      renderPreview = `render failed: ${e instanceof Error ? e.message : String(e)}${e instanceof Error && e.stack ? "\n" + e.stack : ""}`;
+    }
+    return NextResponse.json({ ...diag, mongoStatus, renderPreview });
+  }
 
   // --- 1. Try Mongo cache (best-effort; don't fail render if DB is unreachable) ----
   let doc: AssetDoc | null = null;
   try {
     await connectDB();
     doc = (await SignatureAsset.findOne({ key }).lean()) as unknown as AssetDoc | null;
-  } catch (e) {
-    if (debug) {
-      return NextResponse.json({ stage: "mongo-read", error: String(e) }, { status: 500 });
-    }
+  } catch {
     // Continue — we'll render fresh below.
   }
 

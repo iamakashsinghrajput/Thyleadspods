@@ -275,7 +275,7 @@ function renderSignatureHtml(sig: SignatureDoc, logoSrc?: string, shineSrc?: str
 
 function SignatureCard({ sig }: { sig: SignatureDoc }) {
   return (
-    <div className="bg-white px-2.5 py-2 sm:px-6 sm:py-5 rounded-xl sm:rounded-2xl shadow-md shadow-[#6800FF]/10 border border-slate-100 font-[Inter,sans-serif] w-full max-w-xl">
+    <div className="bg-transparent px-2.5 py-2 sm:px-6 sm:py-5 rounded-xl sm:rounded-2xl border border-slate-200/60 font-[Inter,sans-serif] w-full max-w-xl">
       <div className="flex items-center gap-2 sm:gap-5 w-full">
         <BrandLogo />
 
