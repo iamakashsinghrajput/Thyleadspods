@@ -13,7 +13,12 @@ const SHINE_GIF_W = SHINE_W;
 const SHINE_GIF_H = SHINE_H;
 const SHINE_DISPLAY_W = SHINE_W;
 const SHINE_DISPLAY_H = SHINE_H;
-const SHINE_ASSET_PATH = "/api/signatures/shine-animation";
+// Bump when the server render changes. This version becomes part of the URL so Gmail's
+// image proxy (which caches external image responses aggressively) treats every version
+// as a brand-new resource instead of serving a stale cached copy.
+const SHINE_ASSET_VERSION = 13;
+const SHINE_ASSET_BASE = "/api/signatures/shine-animation";
+const SHINE_ASSET_PATH = `${SHINE_ASSET_BASE}?v=${SHINE_ASSET_VERSION}`;
 let cachedLogoPng: string | null = null;
 let cachedShineGif: string | null = null;
 
@@ -23,7 +28,7 @@ async function fetchInlineShineDataUri(): Promise<string | undefined> {
   // route is unreachable / returns an error / returns too-large bytes, fall back to the
   // client-side gifenc encoder which is guaranteed to produce a Gmail-safe GIF.
   try {
-    const res = await fetch(`${SHINE_ASSET_PATH}?format=gif&inline=1`, { cache: "force-cache" });
+    const res = await fetch(`${SHINE_ASSET_BASE}?format=gif&inline=1&v=${SHINE_ASSET_VERSION}`, { cache: "force-cache" });
     if (!res.ok) throw new Error(`server render failed: ${res.status}`);
     const buf = await res.arrayBuffer();
     const bytes = new Uint8Array(buf);
