@@ -16,9 +16,11 @@ const SHINE_DISPLAY_H = 22;
 // Bump when the server render changes. This version becomes part of the URL so Gmail's
 // image proxy (which caches external image responses aggressively) treats every version
 // as a brand-new resource instead of serving a stale cached copy.
-const SHINE_ASSET_VERSION = 18;
+const SHINE_ASSET_VERSION = 19;
 const SHINE_ASSET_BASE = "/api/signatures/shine-animation";
-const SHINE_ASSET_PATH = `${SHINE_ASSET_BASE}?v=${SHINE_ASSET_VERSION}`;
+// Gmail's image proxy strips animation from WebP (shows only frame 0) on both web and
+// mobile. Animated GIF is much more reliably preserved, so emails always use GIF.
+const SHINE_ASSET_PATH = `${SHINE_ASSET_BASE}?format=gif&v=${SHINE_ASSET_VERSION}`;
 let cachedLogoPng: string | null = null;
 let cachedShineGif: string | null = null;
 

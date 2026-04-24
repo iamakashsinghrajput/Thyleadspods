@@ -21,9 +21,9 @@ export const maxDuration = 60;
 type Variant = "webp" | "gif" | "gif-inline";
 
 const KEY: Record<Variant, string> = {
-  "webp": "thyleads-shine-webp-v18",
-  "gif": "thyleads-shine-gif-v18",
-  "gif-inline": "thyleads-shine-gif-inline-v18",
+  "webp": "thyleads-shine-webp-v19",
+  "gif": "thyleads-shine-gif-v19",
+  "gif-inline": "thyleads-shine-gif-inline-v19",
 };
 
 interface AssetDoc {
