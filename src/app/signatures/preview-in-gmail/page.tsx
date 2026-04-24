@@ -72,7 +72,9 @@ export default function PreviewInGmailPage() {
   const [surface, setSurface] = useState<Surface>("desktop");
   const [renderedHtml, setRenderedHtml] = useState<string>("");
   const [copiedRaw, setCopiedRaw] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
+  // Seed with a timestamp so first render uses a unique cache-bust token rather than `?t=0`,
+  // which Vercel's CDN might have cached from an earlier broken deploy.
+  const [refreshKey, setRefreshKey] = useState(() => Date.now());
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const selected = useMemo(() => signatures.find((s) => s.id === selectedId), [signatures, selectedId]);
@@ -193,7 +195,7 @@ export default function PreviewInGmailPage() {
               </button>
             </div>
             <button
-              onClick={() => setRefreshKey((k) => k + 1)}
+              onClick={() => setRefreshKey(Date.now())}
               className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-xl transition-colors"
               title="Reload preview"
             >

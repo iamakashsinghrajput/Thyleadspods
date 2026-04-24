@@ -482,31 +482,32 @@ export default function Signature() {
     const plain = [sig.personName, sig.position, sig.phone, sig.linkedInUrl, sig.websiteUrl]
       .filter(Boolean)
       .join("\n");
+    // Resolve the embeds up-front so every clipboard path (ClipboardItem, writeText fallback,
+    // execCommand fallback) embeds the logo + animation, not a stripped-down static fallback.
+    const { logo, shine } = await resolveEmbeds();
+    const html = renderSignatureHtml(sig, logo, shine);
     try {
       const ClipItem = (window as unknown as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
       if (ClipItem && navigator.clipboard && "write" in navigator.clipboard) {
-        const htmlPromise = resolveEmbeds().then(({ logo, shine }) =>
-          new Blob([renderSignatureHtml(sig, logo, shine)], { type: "text/html" })
-        );
         await navigator.clipboard.write([
           new ClipItem({
-            "text/html": htmlPromise,
+            "text/html": new Blob([html], { type: "text/html" }),
             "text/plain": new Blob([plain], { type: "text/plain" }),
           }),
         ]);
       } else {
-        const { logo, shine } = await resolveEmbeds();
-        await navigator.clipboard.writeText(renderSignatureHtml(sig, logo, shine));
+        await navigator.clipboard.writeText(html);
       }
       setCopiedId(sig.id);
       setTimeout(() => setCopiedId(null), 1500);
-    } catch {
-      try {
-        await navigator.clipboard.writeText(renderSignatureHtml(sig));
-        setCopiedId(sig.id);
-        setTimeout(() => setCopiedId(null), 1500);
-      } catch {}
-    }
+      return;
+    } catch {}
+    // Last-resort fallback: still include the animation, just as raw HTML on the plain clipboard.
+    try {
+      await navigator.clipboard.writeText(html);
+      setCopiedId(sig.id);
+      setTimeout(() => setCopiedId(null), 1500);
+    } catch {}
   }
 
   async function downloadSignatureFile(sig: SignatureDoc) {
