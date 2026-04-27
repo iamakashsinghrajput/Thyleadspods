@@ -344,12 +344,12 @@ export default function ClientPortal() {
               <p className="text-xs text-slate-400 mt-1">{search || statusFilter !== "all" || monthFilter !== "all" ? "Try adjusting your filters" : "Meetings will appear here once scheduled"}</p>
             </div>
           ) : (
-            <div>
+            <div className="max-h-110 overflow-y-auto">
               {monthGroupKeys.map((monthKey) => {
                 const group = groupedByMonth[monthKey];
                 return (
                   <div key={monthKey}>
-                    <div className="px-6 py-2.5 bg-slate-50 border-y border-slate-100 flex items-center justify-between sticky top-[61px] z-10">
+                    <div className="px-6 py-2.5 bg-slate-50 border-y border-slate-100 flex items-center justify-between sticky top-0 z-10">
                       <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">{monthKey}</p>
                       <p className="text-[11px] font-semibold text-slate-500 tabular-nums">{group.length} meeting{group.length !== 1 ? "s" : ""}</p>
                     </div>
@@ -377,10 +377,6 @@ export default function ClientPortal() {
                             <div className="flex-1 min-w-0 pt-0.5">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <p className="text-sm font-bold text-slate-900 truncate">{m.companyName}</p>
-                                <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md ${st.bg} ${st.text}`}>
-                                  <span className={`w-1 h-1 rounded-full ${dotColor}`} />
-                                  {st.label}
-                                </span>
                                 {hasRemark && (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#6800FF] bg-[#6800FF]/5 border border-[#6800FF]/10 px-2 py-0.5 rounded-md">
                                     <MessageSquare size={9} /> Remark
@@ -390,21 +386,25 @@ export default function ClientPortal() {
                               <p className="text-xs text-slate-600 mt-1 truncate">
                                 {m.contactName}{m.contactTitle ? <span className="text-slate-400"> · {m.contactTitle}</span> : null}
                               </p>
-                              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                                <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 tabular-nums">
-                                  <Clock size={10} className="text-slate-400" /> {m.meetingTime || "—"}
-                                </span>
-                                <span className="font-mono text-[10px] text-slate-400">{m.meetingId}</span>
-                                {hasRemark && rm && (
-                                  <span className="text-[10px] text-slate-400">Updated {fmtRelative(rm.updatedAt)}</span>
-                                )}
-                              </div>
+                              {hasRemark && rm && (
+                                <p className="text-[10px] text-slate-400 mt-1.5">Updated {fmtRelative(rm.updatedAt)}</p>
+                              )}
                             </div>
-                            {m.meetingLink && (
-                              <span className="shrink-0 hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-[#6800FF] bg-[#6800FF]/5 px-2.5 py-1 rounded-md group-hover:bg-[#6800FF]/10 transition-colors">
-                                <Video size={11} /> Join
+                            <div className="shrink-0 flex flex-col items-end gap-1.5 pt-0.5">
+                              <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md ${st.bg} ${st.text}`}>
+                                <span className={`w-1 h-1 rounded-full ${dotColor}`} />
+                                {st.label}
                               </span>
-                            )}
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 tabular-nums">
+                                <Clock size={11} className="text-slate-400" /> {m.meetingTime || "—"}
+                              </span>
+                              <span className="font-mono text-[10px] text-slate-400">{m.meetingId}</span>
+                              {m.meetingLink && (
+                                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-[#6800FF] bg-[#6800FF]/5 px-2.5 py-1 rounded-md group-hover:bg-[#6800FF]/10 transition-colors">
+                                  <Video size={11} /> Join
+                                </span>
+                              )}
+                            </div>
                           </button>
                         );
                       })}

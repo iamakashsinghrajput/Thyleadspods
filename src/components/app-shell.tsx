@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import LoginPage from "@/components/login-page";
 import Sidebar from "@/components/sidebar";
@@ -8,6 +9,12 @@ import ClientPortal from "@/components/client-portal";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, hydrated } = useAuth();
+  const pathname = usePathname();
+
+  const isPublic = pathname?.startsWith("/onboarding-form/");
+  if (isPublic) {
+    return <main className="flex-1 overflow-auto bg-slate-50">{children}</main>;
+  }
 
   if (!hydrated) {
     return (

@@ -10,6 +10,7 @@ import { SidebarProvider } from "@/lib/sidebar-context";
 import { PresenceProvider } from "@/lib/presence-context";
 import AppShell from "@/components/app-shell";
 import GoogleOAuthWrapper from "@/components/google-oauth-wrapper";
+import MobileBlocker from "@/components/mobile-blocker";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -37,6 +38,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="h-full flex overflow-hidden">
+        <MobileBlocker />
         <GoogleOAuthWrapper>
         <AuthProvider>
           <PresenceProvider>

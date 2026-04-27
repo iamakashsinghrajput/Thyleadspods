@@ -1,172 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Share2, Trash2, Copy, Check, X, Pencil, Download } from "lucide-react";
-import { GIFEncoder, quantize, applyPalette } from "gifenc";
+import { Plus, Share2, Trash2, Copy, Check, X, Pencil, Download, Globe, Phone } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { usePods } from "@/lib/pod-context";
 import { SEED_USERS } from "@/lib/seed-users";
-import { SHINE_W, SHINE_H, buildShineFramesCompact, shineFrameSvg } from "@/lib/signature-shine";
-
-const LOGO_PNG_SIZE = 22;
-const SHINE_GIF_W = SHINE_W;
-const SHINE_GIF_H = SHINE_H;
-const SHINE_DISPLAY_W = 80;
-const SHINE_DISPLAY_H = 22;
-// Bump when the server render changes. This version becomes part of the URL so Gmail's
-// image proxy (which caches external image responses aggressively) treats every version
-// as a brand-new resource instead of serving a stale cached copy.
-const SHINE_ASSET_VERSION = 19;
-const SHINE_ASSET_BASE = "/api/signatures/shine-animation";
-// Gmail's image proxy strips animation from WebP (shows only frame 0) on both web and
-// mobile. Animated GIF is much more reliably preserved, so emails always use GIF.
-const SHINE_ASSET_PATH = `${SHINE_ASSET_BASE}?format=gif&v=${SHINE_ASSET_VERSION}`;
-let cachedLogoPng: string | null = null;
-let cachedShineGif: string | null = null;
-
-async function fetchInlineShineDataUri(): Promise<string | undefined> {
-  if (cachedShineGif) return cachedShineGif;
-  // Prefer the sharp-rendered server GIF (dithered, with real Inter) — but if the server
-  // route is unreachable / returns an error / returns too-large bytes, fall back to the
-  // client-side gifenc encoder which is guaranteed to produce a Gmail-safe GIF.
-  try {
-    const res = await fetch(`${SHINE_ASSET_BASE}?format=gif&inline=1&v=${SHINE_ASSET_VERSION}`, { cache: "force-cache" });
-    if (!res.ok) throw new Error(`server render failed: ${res.status}`);
-    const buf = await res.arrayBuffer();
-    const bytes = new Uint8Array(buf);
-    if (bytes.length > 8 * 1024) throw new Error("too large to inline");
-    let binary = "";
-    const CHUNK = 0x8000;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-    }
-    cachedShineGif = `data:image/gif;base64,${btoa(binary)}`;
-    return cachedShineGif;
-  } catch {
-    return buildShineGifDataUri().catch(() => undefined);
-  }
-}
-
-function isPublicOrigin(origin: string): boolean {
-  if (!origin) return false;
-  try {
-    const u = new URL(origin);
-    const host = u.hostname;
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return false;
-    if (/^10\./.test(host)) return false;
-    if (/^192\.168\./.test(host)) return false;
-    if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// On a publicly-reachable origin we reference the hosted URL directly — Gmail's image
-// proxy fetches it, signature HTML stays tiny, animation quality is the full-res WebP.
-// On localhost / private networks we embed the GIF inline (Gmail's proxy can't reach localhost).
-async function resolveShineSrc(): Promise<string | undefined> {
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-  if (isPublicOrigin(origin)) {
-    return `${origin}${SHINE_ASSET_PATH}`;
-  }
-  return fetchInlineShineDataUri();
-}
-
-async function rasterizeSvgToImageData(svg: string, w: number, h: number): Promise<Uint8ClampedArray> {
-  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  try {
-    const img = new Image();
-    img.decoding = "async";
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error("svg load failed"));
-      img.src = url;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("no 2d ctx");
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-    return new Uint8ClampedArray(ctx.getImageData(0, 0, w, h).data);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-async function buildShineGifDataUri(): Promise<string> {
-  if (cachedShineGif) return cachedShineGif;
-  const W = SHINE_GIF_W;
-  const H = SHINE_GIF_H;
-
-  const frames = buildShineFramesCompact();
-  const raster = await Promise.all(frames.map((f) => rasterizeSvgToImageData(shineFrameSvg(f.reveal, f.shine), W, H)));
-
-  const combinedLen = raster.reduce((a, r) => a + r.length, 0);
-  const combined = new Uint8ClampedArray(combinedLen);
-  let offset = 0;
-  for (const r of raster) {
-    combined.set(r, offset);
-    offset += r.length;
-  }
-  const globalPalette = quantize(combined, 32, { format: "rgb444" });
-
-  const encoder = GIFEncoder();
-  for (let i = 0; i < frames.length; i++) {
-    const indexed = applyPalette(raster[i], globalPalette, "rgb444");
-    encoder.writeFrame(indexed, W, H, {
-      palette: i === 0 ? globalPalette : undefined,
-      first: i === 0,
-      delay: frames[i].delay,
-      dispose: 1,
-      repeat: i === 0 ? 0 : undefined,
-    });
-  }
-  encoder.finish();
-
-  const bytes = encoder.bytes();
-  let binary = "";
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  }
-  cachedShineGif = `data:image/gif;base64,${btoa(binary)}`;
-  return cachedShineGif;
-}
-
-async function buildLogoPngDataUri(): Promise<string> {
-  if (cachedLogoPng) return cachedLogoPng;
-  const size = LOGO_PNG_SIZE;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 78 78"><path d="M33.54 78V20.0792H12.48V10.8119H67.86V27.0297H78V0H0V30.8911H21.84V78H33.54Z" fill="#6800FF"/><path d="M55.38 20.0792H43.68V78H78V68.7327H55.38V20.0792Z" fill="#6800FF"/></svg>`;
-  const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  try {
-    const img = new Image();
-    img.decoding = "async";
-    await new Promise<void>((resolve, reject) => {
-      img.onload = () => resolve();
-      img.onerror = () => reject(new Error("logo svg load failed"));
-      img.src = url;
-    });
-    const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("no 2d ctx");
-    ctx.clearRect(0, 0, size, size);
-    ctx.drawImage(img, 0, 0, size, size);
-    cachedLogoPng = canvas.toDataURL("image/png");
-    return cachedLogoPng;
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
+import {
+  buildLogoPngDataUri,
+  buildLinkedInPngDataUri,
+  buildGlobePngDataUri,
+  buildPhonePngDataUri,
+  resolveEmailAssets,
+  normalizeWebsiteHref,
+  renderSignatureHtml,
+  formatIndianPhone,
+  normalizePhoneDigits,
+  PHONE_COUNTRY_CODE,
+  THYLEADS_ADDRESS_LINES,
+  THYLEADS_DISCLAIMER,
+} from "@/lib/signature-email";
 
 interface SignatureDoc {
   id: string;
@@ -204,35 +56,6 @@ const BLANK_FORM: FormState = {
   websiteUrl: "",
 };
 
-const BRAND_STYLES = `
-@keyframes thy-text-in {
-  0%   { clip-path: inset(0 100% 0 0); -webkit-clip-path: inset(0 100% 0 0); filter: blur(4px); }
-  85%  { filter: blur(0.6px); }
-  100% { clip-path: inset(0 0 0 0);    -webkit-clip-path: inset(0 0 0 0); filter: blur(0); }
-}
-@keyframes thy-text-shine {
-  0%   { background-position: 170% 0; }
-  35%  { background-position: -70% 0; }
-  100% { background-position: -70% 0; }
-}
-.thy-brand-text {
-  display: inline-block;
-  clip-path: inset(0 100% 0 0);
-  -webkit-clip-path: inset(0 100% 0 0);
-  filter: blur(4px);
-  background-image: linear-gradient(100deg, #0f172a 0%, #0f172a 38%, #b48bff 47%, #ffffff 50%, #b48bff 53%, #0f172a 62%, #0f172a 100%);
-  background-size: 230% 100%;
-  background-position: 170% 0;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  animation:
-    thy-text-in 1.6s cubic-bezier(0.22, 1, 0.36, 1) 0.3s forwards,
-    thy-text-shine 6s ease-in-out 1.9s infinite;
-}
-`;
-
 function ThyMarkSvg({ className = "", fill = "#ffffff" }: { className?: string; fill?: string }) {
   return (
     <svg viewBox="0 0 78 78" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -244,88 +67,70 @@ function ThyMarkSvg({ className = "", fill = "#ffffff" }: { className?: string; 
 
 function BrandLogo() {
   return (
-    <div className="shrink-0 flex items-center justify-start gap-1 sm:gap-2">
-      <ThyMarkSvg className="w-[17px] h-[17px] sm:w-7 sm:h-7 shrink-0" fill="#6800FF" />
-      <span className="text-slate-300 text-sm sm:text-2xl font-light leading-none select-none">|</span>
-      <span className="thy-brand-text text-[13px] sm:text-[22px] font-extrabold tracking-[0.01em] leading-none">Thyleads</span>
+    <div className="flex flex-col items-center justify-center text-center select-none">
+      <ThyMarkSvg className="w-10 h-10 sm:w-[72px] sm:h-[72px]" fill="#6800FF" />
+      <span className="text-lg sm:text-[40px] font-extrabold text-slate-900 mt-1.5 sm:mt-3 leading-none tracking-tight">Thyleads</span>
+      <span className="text-[9px] sm:text-[11px] font-semibold text-slate-500 mt-3 sm:mt-5 uppercase tracking-wider">Trusted by Top SaaS Companies</span>
     </div>
   );
 }
 
-// Build a canonical href from whatever variant the admin entered (e.g. "www.thyleads.com",
-// "thyleads.com", "https://www.thyleads.com"). Always returns "https://<apex-domain>/".
-function normalizeWebsiteHref(url: string): string {
-  if (!url) return "";
-  const apex = url.trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/+$/, "");
-  return apex ? `https://${apex}/` : "";
-}
-
-function renderSignatureHtml(sig: SignatureDoc, logoSrc?: string, shineSrc?: string): string {
-  const linkedIn = sig.linkedInUrl
-    ? `<a href="${sig.linkedInUrl}" style="color:#0f172a;text-decoration:underline;font-weight:600;white-space:nowrap;">Linkedin</a>`
-    : "";
-  const websiteHref = normalizeWebsiteHref(sig.websiteUrl);
-  const website = sig.websiteUrl
-    ? `<a href="${websiteHref}" style="color:#0f172a;text-decoration:underline;font-weight:600;word-break:break-all;">${sig.websiteUrl.replace(/^https?:\/\//, "")}</a>`
-    : "";
-  const sep = linkedIn && website ? `<span style="color:#d1d5db;margin:0 8px;">|</span>` : "";
-  // Wrap the animated image in a text span that also says "Thyleads". If the image loads,
-  // it visually covers the fallback. If it fails (Gmail proxy error, slow load), the text
-  // stays visible so the wordmark is NEVER blank. Inline-block width/height matches the img
-  // so layout doesn't jump.
-  const fallbackText = `<span style="color:#0f172a;font-family:Inter,Arial,sans-serif;font-size:16px;font-weight:800;letter-spacing:0.2px;line-height:${SHINE_DISPLAY_H}px;white-space:nowrap;">Thyleads</span>`;
-  const thyleadsCell = shineSrc
-    ? `<img src="${shineSrc}" alt="Thyleads" width="${SHINE_DISPLAY_W}" height="${SHINE_DISPLAY_H}" style="display:block;border:0;outline:none;width:${SHINE_DISPLAY_W}px;height:${SHINE_DISPLAY_H}px;"/>`
-    : fallbackText;
-  const logoCell = logoSrc
-    ? `<img src="${logoSrc}" alt="Thyleads logo" width="${LOGO_PNG_SIZE}" height="${LOGO_PNG_SIZE}" style="display:block;border:0;outline:none;"/>`
-    : `<div style="width:${LOGO_PNG_SIZE}px;height:${LOGO_PNG_SIZE}px;background:#6800FF;border-radius:5px;"></div>`;
-  const brandBlock = `<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;"><tr><td style="vertical-align:middle;padding:0 6px 0 0;">${logoCell}</td><td style="vertical-align:middle;color:#cbd5e1;font-size:16px;font-weight:200;padding:0 6px 0 0;line-height:1;">|</td><td style="vertical-align:middle;">${thyleadsCell}</td></tr></table>`;
-  return `
-<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;font-family:Inter,Arial,sans-serif;color:#111827;max-width:380px;">
-  <tr>
-    <td style="vertical-align:middle;padding:2px 10px 2px 0;border-right:1px solid #e2e8f0;">
-      ${brandBlock}
-    </td>
-    <td style="vertical-align:middle;padding:2px 0 2px 10px;">
-      <div style="font-size:15px;font-weight:700;color:#6800FF;line-height:1.15;">${sig.personName}</div>
-      <div style="font-size:11px;font-weight:600;color:#111827;margin-top:3px;line-height:1.3;">${sig.position}</div>
-      <div style="margin-top:5px;color:#6b7280;font-size:10px;line-height:1.4;">${sig.phone}</div>
-      <div style="margin-top:4px;font-size:10px;line-height:1.4;">${linkedIn}${sep}${website}</div>
-    </td>
-  </tr>
-</table>`.trim();
-}
-
 function SignatureCard({ sig }: { sig: SignatureDoc }) {
+  const websiteText = sig.websiteUrl ? sig.websiteUrl.replace(/^https?:\/\//, "").replace(/\/$/, "") : "";
   return (
-    <div className="bg-transparent px-2 py-1.5 sm:px-6 sm:py-5 rounded-lg sm:rounded-2xl border border-slate-200/60 font-[Inter,sans-serif] w-full max-w-[300px] sm:max-w-xl">
-      <div className="flex items-center gap-1.5 sm:gap-5 w-full">
-        <BrandLogo />
+    <div className="font-[Inter,sans-serif] w-full max-w-4xl">
+      <div className="bg-white px-3 py-3 sm:px-8 sm:py-5 rounded-xl sm:rounded-2xl border border-slate-200/60">
+      <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-stretch sm:gap-8">
+        <div className="w-full sm:flex-1 flex items-center justify-center px-1 sm:px-4 min-w-0">
+          <BrandLogo />
+        </div>
 
-        <div className="w-px self-stretch bg-slate-200" aria-hidden />
+        <div className="hidden sm:block w-px self-stretch bg-slate-300" aria-hidden />
+        <div className="sm:hidden w-full h-px bg-slate-200" aria-hidden />
 
-        <div className="flex flex-col min-w-0 flex-1 text-left">
-          <h1 className="text-[13px] sm:text-[22px] font-bold text-[#6800FF] leading-tight truncate">{sig.personName || "Full name"}</h1>
-          {sig.position && <h2 className="text-[9px] sm:text-[15px] font-semibold text-slate-800 mt-0.5 sm:mt-1 truncate leading-tight">{sig.position}</h2>}
-          {sig.phone && <p className="text-[9px] sm:text-[13px] text-slate-500 mt-0.5 sm:mt-2 tracking-wide">{sig.phone}</p>}
+        <div className="w-full sm:flex-1 flex flex-col justify-center text-center sm:text-left min-w-0 sm:pl-2">
+          <h1 className="text-xl sm:text-[28px] font-extrabold text-[#6800FF] leading-tight">{sig.personName || "Full name"}</h1>
+          {sig.position && <h2 className="text-sm sm:text-base font-bold text-slate-900 mt-0.5 sm:mt-1">{sig.position}</h2>}
+          {sig.phone && (
+            <p className="inline-flex items-center justify-center sm:justify-start gap-1.5 text-xs sm:text-sm text-slate-700 mt-1.5 sm:mt-2.5 tracking-wide">
+              <Phone size={12} className="text-[#6800FF] shrink-0" strokeWidth={2.2} />
+              {formatIndianPhone(sig.phone)}
+            </p>
+          )}
+          <div className="mt-1 sm:mt-1.5 text-[10px] sm:text-[11px] text-slate-500 leading-tight">
+            {THYLEADS_ADDRESS_LINES.map((line) => <div key={line}>{line}</div>)}
+          </div>
           {(sig.linkedInUrl || sig.websiteUrl) && (
-            <div className="mt-0.5 sm:mt-1.5 text-[9px] sm:text-[13px] font-semibold flex flex-wrap gap-x-1 sm:gap-x-1.5 justify-start">
+            <div className="mt-2 sm:mt-3 flex items-center justify-center sm:justify-start gap-2 sm:gap-3 text-xs sm:text-sm font-bold flex-wrap">
               {sig.linkedInUrl && (
-                <a href={sig.linkedInUrl} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-[#6800FF] transition-colors underline decoration-1 underline-offset-2">
+                <a href={sig.linkedInUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-slate-900 underline decoration-1 underline-offset-2 hover:text-[#6800FF] transition-colors">
+                  <span className="inline-flex items-center justify-center w-4 h-4 sm:w-[18px] sm:h-[18px] bg-[#0A66C2] rounded-[3px] shrink-0">
+                    <svg viewBox="0 0 24 24" fill="white" className="w-3 h-3 sm:w-3.5 sm:h-3.5" aria-hidden>
+                      <circle cx="7.1" cy="7.6" r="1.55" />
+                      <rect x="5.6" y="9.7" width="3" height="9" />
+                      <path d="M10.6 9.7h2.85v1.25h.04c.4-.72 1.36-1.45 2.81-1.45 3 0 3.55 1.85 3.55 4.25V18.7h-3v-3.95c0-.95-.02-2.15-1.4-2.15-1.4 0-1.62 1-1.62 2.05V18.7h-3V9.7z" />
+                    </svg>
+                  </span>
                   Linkedin
                 </a>
               )}
               {sig.linkedInUrl && sig.websiteUrl && <span className="text-slate-300">|</span>}
               {sig.websiteUrl && (
-                <a href={normalizeWebsiteHref(sig.websiteUrl)} target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-[#6800FF] transition-colors underline decoration-1 underline-offset-2 break-all">
-                  {sig.websiteUrl.replace(/^https?:\/\//, "")}
+                <a href={normalizeWebsiteHref(sig.websiteUrl)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-slate-900 underline decoration-1 underline-offset-2 hover:text-[#6800FF] transition-colors break-all">
+                  <span className="inline-flex items-center justify-center w-4 h-4 sm:w-[18px] sm:h-[18px] bg-[#3b82f6] rounded-full shrink-0">
+                    <Globe size={11} className="text-white" strokeWidth={2.2} />
+                  </span>
+                  {websiteText}
                 </a>
               )}
             </div>
           )}
         </div>
       </div>
+      </div>
+      <p className="mt-2.5 px-1 text-[9px] sm:text-[10px] leading-relaxed text-slate-400 italic">
+        {THYLEADS_DISCLAIMER}
+      </p>
     </div>
   );
 }
@@ -375,16 +180,10 @@ export default function Signature() {
 
   useEffect(() => {
     if (!user) return;
-    // Prebuild the logo PNG so Copy is instant.
     void buildLogoPngDataUri().catch(() => {});
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
-    if (isPublicOrigin(origin)) {
-      // Warm the hosted WebP so Gmail's first fetch through its image proxy is fast.
-      void fetch(`${origin}${SHINE_ASSET_PATH}`, { method: "GET", cache: "no-store" }).catch(() => {});
-    } else {
-      // On localhost, pre-fetch the compact GIF and cache its base64 data URI.
-      void fetchInlineShineDataUri().catch(() => {});
-    }
+    void buildLinkedInPngDataUri().catch(() => {});
+    void buildGlobePngDataUri().catch(() => {});
+    void buildPhonePngDataUri().catch(() => {});
   }, [user]);
 
   if (!user) return null;
@@ -494,22 +293,12 @@ export default function Signature() {
     setShareEmails((prev) => prev.filter((e) => e !== email));
   }
 
-  async function resolveEmbeds(): Promise<{ logo?: string; shine?: string }> {
-    const [logo, shine] = await Promise.all([
-      buildLogoPngDataUri().catch(() => undefined),
-      resolveShineSrc(),
-    ]);
-    return { logo, shine };
-  }
-
   async function copySignatureHtml(sig: SignatureDoc) {
     const plain = [sig.personName, sig.position, sig.phone, sig.linkedInUrl, sig.websiteUrl]
       .filter(Boolean)
       .join("\n");
-    // Resolve the embeds up-front so every clipboard path (ClipboardItem, writeText fallback,
-    // execCommand fallback) embeds the logo + animation, not a stripped-down static fallback.
-    const { logo, shine } = await resolveEmbeds();
-    const html = renderSignatureHtml(sig, logo, shine);
+    const assets = await resolveEmailAssets();
+    const html = renderSignatureHtml(sig, assets);
     try {
       const ClipItem = (window as unknown as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
       if (ClipItem && navigator.clipboard && "write" in navigator.clipboard) {
@@ -526,7 +315,6 @@ export default function Signature() {
       setTimeout(() => setCopiedId(null), 1500);
       return;
     } catch {}
-    // Last-resort fallback: still include the animation, just as raw HTML on the plain clipboard.
     try {
       await navigator.clipboard.writeText(html);
       setCopiedId(sig.id);
@@ -539,8 +327,8 @@ export default function Signature() {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "");
-    const { logo, shine } = await resolveEmbeds();
-    const body = renderSignatureHtml(sig, logo, shine);
+    const assets = await resolveEmailAssets();
+    const body = renderSignatureHtml(sig, assets);
     const plain = [sig.personName, sig.position, sig.phone, sig.linkedInUrl, sig.websiteUrl]
       .filter(Boolean)
       .join("\\n");
@@ -642,7 +430,6 @@ export default function Signature() {
 
   return (
     <div className="px-8 py-8">
-      <style dangerouslySetInnerHTML={{ __html: BRAND_STYLES }} />
       <div className="flex items-start justify-between mb-6">
         <div>
           <p className="text-sm font-medium text-[#6800FF] tracking-wide uppercase mb-1">Signatures</p>
@@ -684,8 +471,18 @@ export default function Signature() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <input placeholder="Template name (e.g. Bharath – Business Head)" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="col-span-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]" />
             <input placeholder="Full name" value={form.personName} onChange={(e) => setForm({ ...form, personName: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]" />
-            <input placeholder="Position (e.g. Business Head | Thyleads)" value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]" />
-            <input placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]" />
+            <input placeholder="Position (e.g. CEO | Thyleads)" value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]" />
+            <div className="flex items-stretch border border-slate-200 rounded-lg overflow-hidden focus-within:ring-2 focus-within:ring-[#6800FF]/20 focus-within:border-[#6800FF]">
+              <span className="inline-flex items-center px-3 bg-slate-50 border-r border-slate-200 text-sm font-semibold text-slate-600 select-none">{PHONE_COUNTRY_CODE}</span>
+              <input
+                inputMode="numeric"
+                placeholder="98765 43210"
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: normalizePhoneDigits(e.target.value) })}
+                maxLength={10}
+                className="flex-1 px-3 py-2 text-sm bg-white focus:outline-none tabular-nums"
+              />
+            </div>
             <input placeholder="LinkedIn URL" value={form.linkedInUrl} onChange={(e) => setForm({ ...form, linkedInUrl: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#000000]" />
             <input placeholder="Website (e.g. https://www.thyleads.com)" value={form.websiteUrl} onChange={(e) => setForm({ ...form, websiteUrl: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#000000]" />
           </div>

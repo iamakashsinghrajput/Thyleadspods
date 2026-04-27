@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, RefreshCw, Copy, Check, Mail, Smartphone, Monitor } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { renderSignatureHtml, resolveEmailAssets } from "@/lib/signature-email";
 
 interface SignatureDoc {
   id: string;
@@ -98,55 +99,10 @@ export default function PreviewInGmailPage() {
 
   const buildAndRender = useCallback(async () => {
     if (!selected) return;
-    const size = 28;
-    const logoSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 78 78"><path d="M33.54 78V20.0792H12.48V10.8119H67.86V27.0297H78V0H0V30.8911H21.84V78H33.54Z" fill="#6800FF"/><path d="M55.38 20.0792H43.68V78H78V68.7327H55.38V20.0792Z" fill="#6800FF"/></svg>`;
-    const logoSrc = `data:image/svg+xml;base64,${btoa(logoSvg)}`;
-
-    // Fetch the inline animated GIF bytes and embed as data URI (same path the real
-    // Copy-for-Gmail flow uses). Cache-busted against the refreshKey so Reload always
-    // picks up the latest render from the server.
-    let shineSrc = "";
-    try {
-      const res = await fetch(`/api/signatures/shine-animation?format=gif&inline=1&t=${refreshKey}`, { cache: "no-store" });
-      if (res.ok) {
-        const buf = await res.arrayBuffer();
-        const bytes = new Uint8Array(buf);
-        let binary = "";
-        const CHUNK = 0x8000;
-        for (let i = 0; i < bytes.length; i += CHUNK) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-        }
-        shineSrc = `data:image/gif;base64,${btoa(binary)}`;
-      }
-    } catch {}
-
-    const linkedIn = selected.linkedInUrl
-      ? `<a href="${selected.linkedInUrl}" style="color:#0f172a;text-decoration:underline;font-weight:600;white-space:nowrap;">Linkedin</a>`
-      : "";
-    const website = selected.websiteUrl
-      ? `<a href="${selected.websiteUrl}" style="color:#0f172a;text-decoration:underline;font-weight:600;word-break:break-all;">${selected.websiteUrl.replace(/^https?:\/\//, "")}</a>`
-      : "";
-    const sep = linkedIn && website ? `<span style="color:#d1d5db;margin:0 8px;">|</span>` : "";
-    // If the inline fetch failed, fall back to a static text span so the preview still renders.
-    const thyleadsCell = shineSrc
-      ? `<img src="${shineSrc}" alt="Thyleads" width="108" height="30" style="display:block;border:0;outline:none;"/>`
-      : `<span style="color:#0f172a;font-size:22px;font-weight:900;letter-spacing:0.3px;line-height:1;white-space:nowrap;">Thyleads</span>`;
-    const brandBlock = `<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;"><tr><td style="vertical-align:middle;padding:0 8px 0 0;"><img src="${logoSrc}" alt="Thyleads logo" width="${size}" height="${size}" style="display:block;border:0;outline:none;"/></td><td style="vertical-align:middle;color:#cbd5e1;font-size:24px;font-weight:200;padding:0 8px 0 0;line-height:1;">|</td><td style="vertical-align:middle;">${thyleadsCell}</td></tr></table>`;
-
-    const sig = `<table cellpadding="0" cellspacing="0" role="presentation" style="border-collapse:collapse;font-family:Inter,Arial,sans-serif;color:#111827;">
-  <tr>
-    <td style="vertical-align:middle;padding:4px 14px 4px 0;border-right:1px solid #e2e8f0;">${brandBlock}</td>
-    <td style="vertical-align:middle;padding:4px 0 4px 14px;">
-      <div style="font-size:22px;font-weight:700;color:#6800FF;line-height:1.15;">${selected.personName}</div>
-      <div style="font-size:15px;font-weight:600;color:#111827;margin-top:4px;line-height:1.3;">${selected.position}</div>
-      <div style="margin-top:8px;color:#6b7280;font-size:13px;line-height:1.5;">${selected.phone}</div>
-      <div style="margin-top:6px;font-size:13px;line-height:1.4;">${linkedIn}${sep}${website}</div>
-    </td>
-  </tr>
-</table>`;
-
+    const assets = await resolveEmailAssets();
+    const sig = renderSignatureHtml(selected, assets);
     setRenderedHtml(buildGmailFrameHtml(sig, surface));
-  }, [selected, surface, refreshKey]);
+  }, [selected, surface]);
 
   useEffect(() => {
     let ignore = false;
