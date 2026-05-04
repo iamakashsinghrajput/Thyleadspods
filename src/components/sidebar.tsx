@@ -18,6 +18,7 @@ import {
   FileSignature,
   Send,
   Rocket,
+  Shield,
 } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import { useAuth } from "@/lib/auth-context";
@@ -31,6 +32,7 @@ export default function Sidebar() {
   const [editingPodId, setEditingPodId] = useState<string | null>(null);
   const [editMembers, setEditMembers] = useState("");
   const isAdmin = user?.role === "admin" || user?.role === "superadmin";
+  const isSuperadmin = user?.role === "superadmin";
   const { collapsed, toggle } = useSidebar();
   const [podsOpen, setPodsOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -53,6 +55,7 @@ export default function Sidebar() {
     ...(isAdmin ? [{ href: "/outbound", icon: Rocket, label: "Outbound", exact: false }] : []),
     { href: "/attendance", icon: Clock, label: "Attendance", exact: false },
     { href: "/signatures", icon: FileSignature, label: "Signatures", exact: false },
+    ...(isSuperadmin ? [{ href: "/members", icon: Shield, label: "Members", exact: false }] : []),
   ];
 
   if (collapsed) {
@@ -138,16 +141,30 @@ export default function Sidebar() {
                     {editingPodId === pod.id ? (
                       <div className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5">
                         <p className="text-xs font-semibold text-slate-500">{pod.name} — Edit Members</p>
+                        {pod.members.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {pod.members.map((mn) => (
+                              <span key={mn} className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[11px] text-slate-700">
+                                {mn}
+                                <button
+                                  onClick={() => updatePodMembers(pod.id, pod.members.filter((x) => x !== mn))}
+                                  className="text-slate-400 hover:text-red-600"
+                                  title={`Remove ${mn} from ${pod.name}`}
+                                >×</button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <input
                           type="text"
                           value={editMembers}
                           onChange={(e) => setEditMembers(e.target.value)}
                           className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#6800FF]"
-                          placeholder="Members (comma separated)"
+                          placeholder="Add members (comma separated)"
                         />
                         <div className="flex gap-1.5">
-                          <button onClick={() => { updatePodMembers(pod.id, editMembers.split(",").map((m) => m.trim()).filter(Boolean)); setEditingPodId(null); }} className="flex items-center gap-1 px-2 py-1 bg-[#6800FF] hover:bg-[#5800DD] text-white text-xs font-medium rounded transition-colors"><Check size={11} /> Save</button>
-                          <button onClick={() => setEditingPodId(null)} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-600 text-xs rounded transition-colors">Cancel</button>
+                          <button onClick={() => { updatePodMembers(pod.id, editMembers.split(",").map((m) => m.trim()).filter(Boolean)); setEditingPodId(null); }} className="flex items-center gap-1 px-2 py-1 bg-[#6800FF] hover:bg-[#5800DD] text-white text-xs font-medium rounded transition-colors"><Check size={11} /> Replace all</button>
+                          <button onClick={() => setEditingPodId(null)} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-600 text-xs rounded transition-colors">Done</button>
                         </div>
                       </div>
                     ) : (
