@@ -4,7 +4,7 @@ import OutboundPilot from "@/lib/models/outbound/pilot";
 import { runPipelineSafe } from "@/lib/outbound/orchestrator";
 import type { PhaseKey } from "@/lib/outbound/types";
 
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   await connectDB();
