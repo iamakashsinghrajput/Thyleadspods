@@ -31,31 +31,53 @@ export async function searchAccounts(input: ApolloSearchInput): Promise<ApolloAc
   if (!isApolloLive()) return mockResults(input);
   const apiKey = process.env.APOLLO_API_KEY!;
 
-  const res = await fetch(`${API}/mixed_companies/search?api_key=${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      organization_num_employees_ranges:
-        input.employeeCountMin != null && input.employeeCountMax != null
-          ? [`${input.employeeCountMin},${input.employeeCountMax}`]
-          : undefined,
-      organization_locations: input.geos,
-      industry: input.industry,
-      page: 1,
-      per_page: Math.min(input.perPage ?? 25, 100),
-    }),
-  });
-  if (!res.ok) throw new Error(`apollo search failed: ${res.status}`);
-  type Row = {
-    name?: string;
-    primary_domain?: string;
-    website_url?: string;
-    linkedin_url?: string;
-    industry?: string;
-    estimated_num_employees?: number;
+  // First attempt: include keyword tags from the ICP. If that returns nothing
+  // (common with free-form ICP descriptions), retry without filters.
+  const tags = (input.industry || []).flatMap((s) => s.split(/[,;]/).map((x) => x.trim()).filter(Boolean));
+  let rows = await fetchOrgs(apiKey, input, tags);
+  if (rows.length === 0 && tags.length > 0) {
+    rows = await fetchOrgs(apiKey, input, []);
+  }
+  return rows;
+}
+
+interface ApolloOrgRow {
+  name?: string;
+  primary_domain?: string;
+  website_url?: string;
+  linkedin_url?: string;
+  industry?: string;
+  estimated_num_employees?: number;
+}
+
+async function fetchOrgs(apiKey: string, input: ApolloSearchInput, tags: string[]): Promise<ApolloAccountResult[]> {
+  const reqBody: Record<string, unknown> = {
+    page: 1,
+    per_page: Math.min(input.perPage ?? 25, 100),
   };
-  const data = (await res.json()) as { organizations?: Row[] };
-  return (data.organizations || []).map((o) => ({
+  if (input.employeeCountMin != null && input.employeeCountMax != null) {
+    reqBody.organization_num_employees_ranges = [`${input.employeeCountMin},${input.employeeCountMax}`];
+  }
+  if (input.geos && input.geos.length > 0) reqBody.organization_locations = input.geos;
+  if (tags.length > 0) reqBody.q_organization_keyword_tags = tags;
+
+  const res = await fetch(`${API}/organizations/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      "X-Api-Key": apiKey,
+    },
+    body: JSON.stringify(reqBody),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`apollo ${res.status}: ${errText.slice(0, 300) || res.statusText}`);
+  }
+  // Defensive: accept either "organizations" or "accounts" depending on plan.
+  const data = (await res.json()) as { organizations?: ApolloOrgRow[]; accounts?: ApolloOrgRow[] };
+  const orgs = data.organizations || data.accounts || [];
+  return orgs.map((o) => ({
     companyName: o.name || "",
     domain: o.primary_domain || "",
     websiteUrl: o.website_url || "",
@@ -63,7 +85,7 @@ export async function searchAccounts(input: ApolloSearchInput): Promise<ApolloAc
     industry: o.industry || "",
     employeeCount: o.estimated_num_employees || 0,
     source: "apollo" as const,
-  }));
+  })).filter((r) => r.companyName);
 }
 
 function mockResults(input: ApolloSearchInput): ApolloAccountResult[] {

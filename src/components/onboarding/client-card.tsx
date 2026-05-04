@@ -4,10 +4,12 @@ import { useEffect, useState } from "react";
 import {
   Loader2, X, Check, Mail, Send, Copy, ChevronDown, ChevronRight,
   Sparkles, Building2, FileText, Inbox, Trash2, ShieldCheck, AlertTriangle,
-  Globe, Link as LinkIcon, RefreshCw, Upload,
+  Globe, Link as LinkIcon, RefreshCw, Upload, Bot, Search, TrendingUp, Target, Wand2,
+  Play, Clock,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { STAGES, type ClientStatus } from "@/lib/onboarding/stages";
+import { STAGES, STAGE_ORDER, stageIndex, type ClientStatus } from "@/lib/onboarding/stages";
+import { ONBOARDING_FIELDS, type OnboardingFieldDef } from "@/lib/onboarding/form-fields";
 import type { OnboardingClientDoc, OnboardingAccountDoc, OnboardingContactDoc } from "./types";
 
 const STAGE_TONE: Record<ClientStatus, string> = {
@@ -49,11 +51,78 @@ export default function ClientCard({ client, onChanged }: Props) {
 
       {expanded && (
         <div className="border-t border-slate-100 p-4 sm:p-5 bg-slate-50/40 space-y-4">
+          <JourneyBar status={client.status} />
+          <NextActionCallout client={client} />
           <ClientMeta client={client} onChanged={onChanged} canEdit={canEdit} />
           <StagePanel client={client} onChanged={onChanged} canEdit={canEdit} />
           {canEdit && <DangerZone client={client} onChanged={onChanged} />}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// JOURNEY BAR — visual timeline of all 7 stages with current highlighted
+// ─────────────────────────────────────────────────────────────────────────────
+function JourneyBar({ status }: { status: ClientStatus }) {
+  const currentIdx = stageIndex(status);
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-3">
+      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2.5">Pipeline progress</p>
+      <ol className="flex items-stretch gap-1 overflow-x-auto pb-1">
+        {STAGE_ORDER.map((key, i) => {
+          const s = STAGES[i];
+          const isPast = i < currentIdx;
+          const isCurrent = i === currentIdx;
+          return (
+            <li key={key} className="flex-1 min-w-[80px]">
+              <div className={`flex items-center gap-1.5 ${i > 0 ? "before:content-[''] before:flex-shrink-0 before:h-px before:flex-1 before:-ml-1 before:mr-1 " + (isPast || isCurrent ? "before:bg-[#6800FF]/40" : "before:bg-slate-200") : ""}`}>
+                <div className={`shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${
+                  isPast ? "bg-[#6800FF] text-white"
+                  : isCurrent ? "bg-[#6800FF] text-white ring-4 ring-[#6800FF]/20"
+                  : "bg-slate-200 text-slate-400"
+                }`}>
+                  {isPast ? <Check size={10} /> : i + 1}
+                </div>
+              </div>
+              <p className={`text-[10px] font-semibold mt-1 leading-tight ${isCurrent ? "text-[#6800FF]" : isPast ? "text-slate-700" : "text-slate-400"}`}>
+                {s.shortLabel}
+              </p>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEXT-ACTION CALLOUT — plain English: what's needed and from whom
+// ─────────────────────────────────────────────────────────────────────────────
+const NEXT_ACTIONS: Record<ClientStatus, { who: string; what: string; tone: string }> = {
+  new_client:           { who: "You",        what: "Send the onboarding form to the client below.",                                tone: "bg-blue-50 border-blue-200 text-blue-900" },
+  form_pending:         { who: "Client",     what: "Waiting for the client to fill out the onboarding form.",                     tone: "bg-amber-50 border-amber-200 text-amber-900" },
+  form_received:        { who: "GTM Eng.",   what: "Form is in. Run the AI agents and source matching accounts via Apollo.",      tone: "bg-purple-50 border-purple-200 text-purple-900" },
+  accounts_in_progress: { who: "GTM Eng.",   what: "Keep adding accounts. When the list looks right, send it to the client.",     tone: "bg-purple-50 border-purple-200 text-purple-900" },
+  awaiting_approval:    { who: "Client",     what: "Account list sent. Waiting on the client to approve or reject.",              tone: "bg-orange-50 border-orange-200 text-orange-900" },
+  data_team_extracting: { who: "Data Team",  what: "Approved. Data team enriches contacts via Sales Nav → Google Sheet → Sync.",  tone: "bg-indigo-50 border-indigo-200 text-indigo-900" },
+  ready:                { who: "—",          what: "All set. Contacts are enriched and the client is campaign-ready.",            tone: "bg-emerald-50 border-emerald-200 text-emerald-900" },
+};
+
+function NextActionCallout({ client }: { client: OnboardingClientDoc }) {
+  const a = NEXT_ACTIONS[client.status];
+  return (
+    <div className={`rounded-xl border p-3 flex items-start gap-3 ${a.tone}`}>
+      <div className="shrink-0 mt-0.5">
+        <div className="w-7 h-7 rounded-lg bg-white/70 flex items-center justify-center">
+          <Sparkles size={14} />
+        </div>
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-wider opacity-70">Next up · {a.who}</p>
+        <p className="text-sm font-semibold mt-0.5">{a.what}</p>
+      </div>
     </div>
   );
 }
@@ -142,6 +211,9 @@ function StagePanel({ client, onChanged, canEdit }: { client: OnboardingClientDo
     <>
       {(client.status === "new_client" || client.status === "form_pending") && <FormPanel client={client} onChanged={onChanged} canEdit={canEdit} />}
       {client.status === "form_received" && <FormAnswersPanel client={client} />}
+      {client.status !== "new_client" && client.status !== "form_pending" && (
+        <AgentInsightsPanel client={client} canEdit={canEdit} />
+      )}
       {(client.status === "form_received" || client.status === "accounts_in_progress" || client.status === "awaiting_approval") && (
         <AccountsPanel client={client} onChanged={onChanged} canEdit={canEdit} />
       )}
@@ -234,33 +306,86 @@ function FormPanel({ client, onChanged, canEdit }: { client: OnboardingClientDoc
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FORM ANSWERS PANEL — read-only ICP summary once the form is submitted
+// FORM ANSWERS PANEL — full answer dump using ONBOARDING_FIELDS as schema
 // ─────────────────────────────────────────────────────────────────────────────
 function FormAnswersPanel({ client }: { client: OnboardingClientDoc }) {
+  const [answers, setAnswers] = useState<Record<string, unknown> | null>(null);
+  const [submittedAt, setSubmittedAt] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/onboarding/form/answers?clientId=${encodeURIComponent(client.id)}`, { cache: "no-store" });
+        const data = await res.json();
+        if (ignore) return;
+        setAnswers(data.answers || {});
+        setSubmittedAt(data.submittedAt || null);
+      } catch {
+        if (!ignore) setAnswers({});
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    })();
+    return () => { ignore = true; };
+  }, [client.id]);
+
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <FileText size={14} className="text-[#6800FF]" />
-        <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Form answers · client&apos;s brief</p>
-      </div>
-      <div className="text-[11px] space-y-1.5">
-        {client.icp && <p><strong className="text-slate-700">ICP — </strong><span className="text-slate-600">{client.icp}</span></p>}
-        {client.jobTitles.length > 0 && (
-          <p>
-            <strong className="text-slate-700">Target job titles — </strong>
-            {client.jobTitles.map((t) => <span key={t} className="inline-block mr-1 text-[10px] bg-[#f0e6ff] text-[#6800FF] px-1.5 py-0.5 rounded">{t}</span>)}
-          </p>
-        )}
-        {client.competitors.length > 0 && (
-          <p>
-            <strong className="text-slate-700">Competitors — </strong>
-            {client.competitors.map((t) => <span key={t} className="inline-block mr-1 text-[10px] bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">{t}</span>)}
-          </p>
-        )}
-        {!client.icp && client.jobTitles.length === 0 && (
-          <p className="text-slate-400 italic">No answers captured yet.</p>
+    <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2.5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <FileText size={14} className="text-[#6800FF]" />
+          <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Form answers · client&apos;s brief</p>
+        </div>
+        {submittedAt && (
+          <span className="text-[10px] text-slate-400">Submitted {new Date(submittedAt).toLocaleString()}</span>
         )}
       </div>
+      <p className="text-[11px] text-slate-500">Everything the client filled in their onboarding form. Used by the AI agents and Apollo search.</p>
+      {loading ? (
+        <div className="flex items-center justify-center py-3"><Loader2 size={14} className="text-[#6800FF] animate-spin" /></div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {ONBOARDING_FIELDS.map((field) => (
+            <FormAnswerCard key={field.key} field={field} value={answers?.[field.key] ?? fallbackFromClient(field, client)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function fallbackFromClient(field: OnboardingFieldDef, client: OnboardingClientDoc): unknown {
+  // If the answers endpoint is empty for any reason, fall back to the denormalized fields on the client doc.
+  if (field.key === "icp") return client.icp;
+  if (field.key === "jobTitles") return client.jobTitles;
+  if (field.key === "competitors") return client.competitors;
+  return undefined;
+}
+
+function FormAnswerCard({ field, value }: { field: OnboardingFieldDef; value: unknown }) {
+  const isEmpty =
+    value == null ||
+    (typeof value === "string" && value.trim().length === 0) ||
+    (Array.isArray(value) && value.length === 0);
+  const colSpan = field.type === "textarea" ? "sm:col-span-2" : "";
+  return (
+    <div className={`bg-slate-50/60 border border-slate-200 rounded-lg p-2.5 ${colSpan}`}>
+      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{field.label}</p>
+      {isEmpty ? (
+        <p className="text-[11px] text-slate-400 italic mt-1">— not answered —</p>
+      ) : field.type === "tags" ? (
+        <div className="flex flex-wrap gap-1 mt-1.5">
+          {(value as string[]).map((t, i) => (
+            <span key={i} className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${field.key === "jobTitles" ? "bg-[#f0e6ff] text-[#6800FF]" : field.key === "competitors" ? "bg-red-50 text-red-700" : "bg-slate-100 text-slate-700"}`}>{t}</span>
+          ))}
+        </div>
+      ) : field.type === "number" ? (
+        <p className="text-sm font-bold text-slate-800 tabular-nums mt-1">{(value as number).toLocaleString()}</p>
+      ) : (
+        <p className="text-[11.5px] text-slate-700 mt-1 leading-relaxed whitespace-pre-wrap">{String(value)}</p>
+      )}
     </div>
   );
 }
@@ -322,12 +447,21 @@ function AccountsPanel({ client, onChanged, canEdit }: { client: OnboardingClien
           autoImport: true,
         }),
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data: {
+        error?: string; isLive?: boolean; inserted?: number; skipped?: number; totalFound?: number;
+        filters?: { industry?: string[]; geos?: string[]; employeeCountMin?: number; employeeCountMax?: number; rationale?: string; resolvedFrom?: string; llmProvider?: string };
+      } = {};
+      try { data = JSON.parse(raw); } catch { /* non-json (e.g. 500 html page) */ }
       if (!res.ok) {
-        setMsg(`Failed: ${data.error || res.statusText}`);
+        setMsg(`Failed (${res.status}): ${data.error || raw.slice(0, 200) || res.statusText}`);
         return;
       }
-      setMsg(`Apollo (${data.isLive ? "live" : "mock"}): inserted ${data.inserted}, skipped ${data.skipped}, found ${data.totalFound}.`);
+      const f = data.filters;
+      const filterLine = f
+        ? ` · filters from ${f.resolvedFrom === "llm" ? `LLM (${f.llmProvider})` : "heuristic"}: industry=[${(f.industry || []).slice(0, 4).join(", ")}], geos=[${(f.geos || []).slice(0, 3).join(", ")}], emp ${f.employeeCountMin}-${f.employeeCountMax}`
+        : "";
+      setMsg(`Apollo (${data.isLive ? "live" : "mock"}): inserted ${data.inserted}, skipped ${data.skipped}, found ${data.totalFound}.${filterLine}`);
       setShowApollo(false);
       refresh();
     } finally {
@@ -775,6 +909,360 @@ function DangerZone({ client, onChanged }: { client: OnboardingClientDoc; onChan
       </button>
     </div>
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENT INSIGHTS PANEL — 4-agent AI pipeline (research / demand / icp / synthesis)
+// ─────────────────────────────────────────────────────────────────────────────
+type AgentKind = "research" | "demand" | "icp" | "synthesis";
+interface AgentResult {
+  kind: AgentKind;
+  status: "running" | "complete" | "failed";
+  output: string;
+  data?: unknown;
+  model: string;
+  isLive: boolean;
+  inputTokens: number;
+  outputTokens: number;
+  startedAt: string | null;
+  completedAt: string | null;
+  error?: string;
+}
+interface AgentRun {
+  id: string;
+  clientId: string;
+  status: "running" | "complete" | "failed";
+  agents: AgentResult[];
+  triggeredBy: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  isLive: boolean;
+}
+
+const AGENT_META: Record<AgentKind, { label: string; subtitle: string; explainer: string; icon: typeof Bot; tone: string }> = {
+  research: {
+    label: "Agent 1 · General research",
+    subtitle: "What does this client actually do?",
+    explainer: "Reads the form answers and writes a one-pager about the client — what they sell, their stage, recent news, and the buyer pain they solve. This becomes context for the other 3 agents.",
+    icon: Search,
+    tone: "bg-blue-50 text-blue-700 border-blue-200",
+  },
+  demand: {
+    label: "Agent 2 · Product demand",
+    subtitle: "Is the market actually buying right now?",
+    explainer: "Checks demand signals (hiring activity, conference activity, recent funding) for the client's buyer segments. Uses an MCP server when configured. Returns a Demand Score 1-10.",
+    icon: TrendingUp,
+    tone: "bg-amber-50 text-amber-700 border-amber-200",
+  },
+  icp: {
+    label: "Agent 3 · ICP discovery",
+    subtitle: "Which companies should we go after?",
+    explainer: "Pulls candidates from Apollo using filters extracted from the client's form, then ranks the Top-10 with rationale and a list of disqualifiers. This is the seed list the GTM Engineer reviews.",
+    icon: Target,
+    tone: "bg-purple-50 text-purple-700 border-purple-200",
+  },
+  synthesis: {
+    label: "Agent 4 · Synthesis + verify",
+    subtitle: "What do we send the prospects?",
+    explainer: "Reads the outputs of Agents 1-3, writes a 3-step email sequence + 2 LinkedIn touches in the client's voice, and flags any claims that should be fact-checked before sending.",
+    icon: Wand2,
+    tone: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  },
+};
+const AGENT_ORDER: AgentKind[] = ["research", "demand", "icp", "synthesis"];
+
+function AgentInsightsPanel({ client, canEdit }: { client: OnboardingClientDoc; canEdit: boolean }) {
+  const { user } = useAuth();
+  const [run, setRun] = useState<AgentRun | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [openKind, setOpenKind] = useState<AgentKind | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/onboarding/agents?clientId=${encodeURIComponent(client.id)}`, { cache: "no-store" });
+        const data = await res.json();
+        if (ignore) return;
+        setRun(data.run as AgentRun | null);
+      } catch {
+        if (!ignore) setRun(null);
+      }
+      if (!ignore) setLoading(false);
+    };
+    tick();
+    // While a run is in progress, poll every 2s. Otherwise refresh every 30s
+    // (cheap insurance against another tab kicking off a run).
+    const interval = setInterval(() => { if (!cancelled) tick(); }, 2000);
+    return () => { ignore = true; cancelled = true; clearInterval(interval); };
+  }, [client.id]);
+
+  async function runNow() {
+    if (!user) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/onboarding/agents/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actorRole: user.role, actorEmail: user.email, clientId: client.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErr(data.error || `Failed (${res.status})`);
+        return;
+      }
+      setRun(data.run as AgentRun);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "unknown");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const agentMap = new Map<AgentKind, AgentResult>();
+  for (const a of run?.agents ?? []) agentMap.set(a.kind, a);
+
+  const isRunning = run?.status === "running" || busy;
+  const tokenTotal = (run?.totalInputTokens ?? 0) + (run?.totalOutputTokens ?? 0);
+
+  // Provider label is whatever model the agents reported. If they're a mix, show the first non-mock.
+  const providerModel = (run?.agents || []).find((a) => a.model && a.model !== "mock")?.model || "mock";
+  const providerLabel = providerLabelFromModel(providerModel);
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2.5">
+      {/* Header row: title + status + provider + run button */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Bot size={14} className="text-[#6800FF]" />
+          <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">AI insights · 4-agent pipeline</p>
+          {run && (
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+              run.status === "complete" ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+              : run.status === "failed" ? "bg-red-50 text-red-700 border-red-200"
+              : "bg-amber-50 text-amber-700 border-amber-200"
+            }`}>
+              {run.status}
+            </span>
+          )}
+          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${run?.isLive ? "bg-[#f0e6ff] text-[#6800FF]" : "bg-slate-100 text-slate-500"}`}>
+            {run?.isLive ? <><Sparkles size={10} /> live · {providerLabel}</> : <>mock · no API key</>}
+          </span>
+          {tokenTotal > 0 && <span className="text-[10px] text-slate-400 tabular-nums">{tokenTotal.toLocaleString()} tokens</span>}
+        </div>
+        {canEdit && (
+          <button
+            onClick={runNow}
+            disabled={busy || isRunning}
+            className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#6800FF] hover:bg-[#5800DD] disabled:bg-slate-300 text-white text-[11px] font-semibold rounded transition-colors"
+          >
+            {busy ? <><Loader2 size={11} className="animate-spin" /> Running…</>
+              : run ? <><RefreshCw size={11} /> Re-run</>
+              : <><Play size={11} /> Run AI agents</>}
+          </button>
+        )}
+      </div>
+
+      {/* Plain-English explainer of what this panel does */}
+      <div className="bg-[#f8f5ff] border border-[#6800FF]/15 rounded-lg p-2.5 text-[11px] text-slate-600">
+        <p className="font-semibold text-[#6800FF] mb-0.5">What is this?</p>
+        <p>
+          Four AI agents read the client&apos;s onboarding form and run in parallel — one researches the client, one checks market demand,
+          one ranks the best-fit companies via Apollo, and one writes the outreach copy with verification notes.
+          {run?.isLive
+            ? ` Currently using ${providerLabel}.`
+            : " Add a free Groq or Gemini key to .env.local to switch from mocks to real output."}
+        </p>
+      </div>
+
+      {err && <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{err}</p>}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-3"><Loader2 size={14} className="text-[#6800FF] animate-spin" /></div>
+      ) : !run ? (
+        <div className="bg-slate-50/60 border border-dashed border-slate-300 rounded-lg p-4 text-center">
+          <Bot size={20} className="text-slate-400 mx-auto" />
+          <p className="text-[12px] font-semibold text-slate-700 mt-2">No run yet</p>
+          <p className="text-[11px] text-slate-500 mt-0.5 max-w-md mx-auto">
+            Click <strong>Run AI agents</strong> to generate the brief, market read, ranked accounts, and outreach copy.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {AGENT_ORDER.map((kind) => {
+            const r = agentMap.get(kind);
+            const meta = AGENT_META[kind];
+            const Icon = meta.icon;
+            const open = openKind === kind;
+            const status: AgentResult["status"] = r?.status ?? (run.status === "running" ? "running" : "failed");
+            return (
+              <div key={kind} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setOpenKind(open ? null : kind)}
+                  className="w-full px-3 py-2.5 flex items-center gap-2.5 text-left hover:bg-slate-50/60 transition-colors"
+                >
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center border ${meta.tone} shrink-0`}>
+                    <Icon size={14} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[12px] font-bold text-slate-800 truncate">{meta.label}</p>
+                    <p className="text-[10.5px] text-slate-500 mt-0.5 truncate">{meta.subtitle}</p>
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      <AgentStatusPill status={status} />
+                      {r && r.outputTokens > 0 && <span className="text-[9px] text-slate-400 tabular-nums">{r.outputTokens.toLocaleString()} tok out</span>}
+                      {r?.completedAt && r.startedAt && (
+                        <span className="text-[9px] text-slate-400 inline-flex items-center gap-0.5"><Clock size={9} /> {Math.max(1, Math.round((new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime()) / 1000))}s</span>
+                      )}
+                    </div>
+                  </div>
+                  {open ? <ChevronDown size={14} className="text-slate-400 shrink-0" /> : <ChevronRight size={14} className="text-slate-400 shrink-0" />}
+                </button>
+                {open && (
+                  <div className="px-3 py-3 border-t border-slate-200 bg-slate-50/30 space-y-2">
+                    <p className="text-[10.5px] text-slate-500 italic leading-relaxed">{meta.explainer}</p>
+                    {r?.error && <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">{r.error}</p>}
+                    {r?.output ? (
+                      <div className="bg-white border border-slate-200 rounded-md p-3">
+                        <MarkdownRender text={r.output} />
+                      </div>
+                    ) : status === "running" ? (
+                      <div className="flex items-center gap-2 text-[11px] text-slate-500 py-2">
+                        <Loader2 size={12} className="animate-spin text-[#6800FF]" /> Generating…
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-slate-400 italic">No output captured.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function providerLabelFromModel(model: string): string {
+  if (!model || model === "mock") return "mock";
+  if (model.startsWith("claude")) return "Claude";
+  if (model.startsWith("llama")) return "Groq · Llama";
+  if (model.startsWith("gemini")) return "Gemini";
+  return model;
+}
+
+// Tiny markdown renderer — handles headings, bold, italic, code, lists, and paragraphs.
+// Keeps the bundle thin (no react-markdown dep) while making agent output readable.
+function MarkdownRender({ text }: { text: string }) {
+  const lines = text.split(/\r?\n/);
+  const blocks: React.ReactNode[] = [];
+  let i = 0;
+  let key = 0;
+
+  function inline(s: string): React.ReactNode {
+    // Order matters: code first, then bold, then italic.
+    const parts: React.ReactNode[] = [];
+    let rest = s;
+    let pk = 0;
+    const tokens = [
+      { re: /`([^`]+)`/, render: (m: string) => <code key={pk++} className="px-1 py-0.5 bg-slate-100 text-[#6800FF] rounded font-mono text-[10.5px]">{m}</code> },
+      { re: /\*\*([^*]+)\*\*/, render: (m: string) => <strong key={pk++} className="font-bold text-slate-900">{m}</strong> },
+      { re: /\*([^*]+)\*/, render: (m: string) => <em key={pk++} className="italic">{m}</em> },
+    ];
+    while (rest.length > 0) {
+      let earliest = -1;
+      let chosen: typeof tokens[number] | null = null;
+      for (const t of tokens) {
+        const m = rest.match(t.re);
+        if (m && m.index !== undefined && (earliest === -1 || m.index < earliest)) {
+          earliest = m.index;
+          chosen = t;
+        }
+      }
+      if (!chosen || earliest === -1) {
+        parts.push(rest);
+        break;
+      }
+      const m = rest.match(chosen.re)!;
+      if (earliest > 0) parts.push(rest.slice(0, earliest));
+      parts.push(chosen.render(m[1]));
+      rest = rest.slice(earliest + m[0].length);
+    }
+    return parts;
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Heading
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) {
+      const level = h[1].length;
+      const cls = level <= 1 ? "text-[15px] font-bold text-slate-900 mt-1"
+        : level === 2 ? "text-[13px] font-bold text-slate-900 mt-2.5"
+        : "text-[12px] font-bold text-slate-800 mt-2";
+      blocks.push(<p key={key++} className={cls}>{inline(h[2])}</p>);
+      i++;
+      continue;
+    }
+
+    // List (consecutive `-` or `*` or `1.` lines)
+    if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*([-*]|\d+\.)\s+/, ""));
+        i++;
+      }
+      blocks.push(
+        <ul key={key++} className="list-disc list-outside ml-4 space-y-0.5 text-[11px] text-slate-700">
+          {items.map((it, idx) => <li key={idx} className="leading-relaxed">{inline(it)}</li>)}
+        </ul>
+      );
+      continue;
+    }
+
+    // Blockquote
+    if (line.startsWith(">")) {
+      blocks.push(<p key={key++} className="text-[10.5px] text-slate-500 italic border-l-2 border-slate-200 pl-2 ml-1">{inline(line.slice(1).trim())}</p>);
+      i++;
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^---+$/.test(line.trim())) {
+      blocks.push(<hr key={key++} className="border-slate-200 my-2" />);
+      i++;
+      continue;
+    }
+
+    // Empty line — paragraph break (skip)
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+
+    // Paragraph: gather consecutive non-empty, non-heading, non-list lines
+    const para: string[] = [];
+    while (i < lines.length && lines[i].trim() !== "" && !/^(#{1,6})\s+/.test(lines[i]) && !/^\s*([-*]|\d+\.)\s+/.test(lines[i]) && !lines[i].startsWith(">")) {
+      para.push(lines[i]);
+      i++;
+    }
+    blocks.push(<p key={key++} className="text-[11px] text-slate-700 leading-relaxed">{inline(para.join(" "))}</p>);
+  }
+
+  return <div className="space-y-1.5">{blocks}</div>;
+}
+
+function AgentStatusPill({ status }: { status: AgentResult["status"] }) {
+  if (status === "complete") return <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">complete</span>;
+  if (status === "failed") return <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-red-100 text-red-700">failed</span>;
+  return <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 inline-flex items-center gap-0.5"><Loader2 size={9} className="animate-spin" /> running</span>;
 }
 
 // Parse pasted accounts: either one company per line, or comma-separated columns.

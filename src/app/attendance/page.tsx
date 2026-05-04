@@ -25,8 +25,11 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { usePods } from "@/lib/pod-context";
-import { getUserId } from "@/lib/chat-users";
 import { SEED_USERS } from "@/lib/seed-users";
+
+function getUserId(name: string): string {
+  return name.toLowerCase().replace(/\s/g, "").split(/\s/)[0];
+}
 
 interface RegRequest {
   _id: string;

@@ -5,9 +5,7 @@ import { AuthProvider } from "@/lib/auth-context";
 import { PodProvider } from "@/lib/pod-context";
 import { DataProvider } from "@/lib/data-context";
 import { NotificationProvider } from "@/lib/notification-context";
-import { ChatProvider } from "@/lib/chat-context";
 import { SidebarProvider } from "@/lib/sidebar-context";
-import { PresenceProvider } from "@/lib/presence-context";
 import AppShell from "@/components/app-shell";
 import GoogleOAuthWrapper from "@/components/google-oauth-wrapper";
 import MobileBlocker from "@/components/mobile-blocker";
@@ -41,19 +39,15 @@ export default function RootLayout({
         <MobileBlocker />
         <GoogleOAuthWrapper>
         <AuthProvider>
-          <PresenceProvider>
-            <PodProvider>
-              <NotificationProvider>
-                <DataProvider>
-                  <ChatProvider>
-                    <SidebarProvider>
-                      <AppShell>{children}</AppShell>
-                    </SidebarProvider>
-                  </ChatProvider>
-                </DataProvider>
-              </NotificationProvider>
-            </PodProvider>
-          </PresenceProvider>
+          <PodProvider>
+            <NotificationProvider>
+              <DataProvider>
+                <SidebarProvider>
+                  <AppShell>{children}</AppShell>
+                </SidebarProvider>
+              </DataProvider>
+            </NotificationProvider>
+          </PodProvider>
         </AuthProvider>
         </GoogleOAuthWrapper>
       </body>

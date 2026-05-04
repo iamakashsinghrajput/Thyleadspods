@@ -4,7 +4,6 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import LoginPage from "@/components/login-page";
 import Sidebar from "@/components/sidebar";
-import ToastBanner from "@/components/toast-banner";
 import ClientPortal from "@/components/client-portal";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -46,7 +45,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <main className="flex-1 overflow-auto bg-slate-100/60">
         {children}
       </main>
-      <ToastBanner />
     </>
   );
 }

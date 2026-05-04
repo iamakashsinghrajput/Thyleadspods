@@ -5,6 +5,7 @@ import OnboardingForm from "@/lib/models/onboarding/form";
 import OnboardingAccount from "@/lib/models/onboarding/account";
 import OnboardingContact from "@/lib/models/onboarding/contact";
 import OnboardingEmailEvent from "@/lib/models/onboarding/email-event";
+import OnboardingAgentRun from "@/lib/models/onboarding/agent-run";
 import { sendEmail } from "@/lib/onboarding/email";
 import { STAGE_ORDER, type ClientStatus } from "@/lib/onboarding/stages";
 
@@ -179,6 +180,7 @@ export async function DELETE(req: NextRequest) {
     OnboardingAccount.deleteMany({ clientId: id }),
     OnboardingContact.deleteMany({ clientId: id }),
     OnboardingEmailEvent.deleteMany({ clientId: id }),
+    OnboardingAgentRun.deleteMany({ clientId: id }),
   ]);
   await OnboardingClient.findByIdAndDelete(id);
   return NextResponse.json({ ok: true });

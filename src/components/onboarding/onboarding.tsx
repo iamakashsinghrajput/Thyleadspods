@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, Search, Inbox, Filter, X } from "lucide-react";
+import { Loader2, Plus, Search, Inbox, Filter, X, ChevronDown, ChevronUp, Mail, Bot, Users, FileText } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { STAGES, type ClientStatus } from "@/lib/onboarding/stages";
 import ClientCard from "./client-card";
@@ -26,6 +26,19 @@ export default function OnboardingDashboard() {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<ClientStatus | "all">("all");
   const [showCreate, setShowCreate] = useState(false);
+  const [helpOpen, setHelpOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("thyleads_onboarding_help_dismissed") !== "1";
+  });
+
+  function dismissHelp() {
+    setHelpOpen(false);
+    localStorage.setItem("thyleads_onboarding_help_dismissed", "1");
+  }
+  function reopenHelp() {
+    setHelpOpen(true);
+    localStorage.removeItem("thyleads_onboarding_help_dismissed");
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -75,12 +88,44 @@ export default function OnboardingDashboard() {
             <h1 className="text-2xl font-bold text-slate-900">Onboarding</h1>
             <p className="text-sm text-slate-500 mt-0.5">Track each client from kickoff form to enriched contacts. One row per client, expand to see the next action.</p>
           </div>
-          {canEdit && (
-            <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#6800FF] hover:bg-[#5800DD] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors">
-              <Plus size={14} /> New client
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {!helpOpen && (
+              <button onClick={reopenHelp} className="inline-flex items-center gap-1 px-2.5 py-2 text-xs font-medium text-slate-500 hover:text-[#6800FF] transition-colors">
+                <ChevronDown size={13} /> How does this work?
+              </button>
+            )}
+            {canEdit && (
+              <button onClick={() => setShowCreate(true)} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#6800FF] hover:bg-[#5800DD] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors">
+                <Plus size={14} /> New client
+              </button>
+            )}
+          </div>
         </div>
+
+        {helpOpen && (
+          <div className="bg-linear-to-br from-[#f8f5ff] to-white rounded-2xl border border-[#6800FF]/20 p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-[#6800FF] text-white flex items-center justify-center"><Bot size={16} /></div>
+                <div>
+                  <p className="text-sm font-bold text-slate-900">How the onboarding pipeline works</p>
+                  <p className="text-[11px] text-slate-500">Six steps from a fresh client to a campaign-ready outbound list.</p>
+                </div>
+              </div>
+              <button onClick={dismissHelp} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors inline-flex items-center gap-1 text-[11px]">
+                <ChevronUp size={13} /> Hide
+              </button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              <HelpStep n={1} icon={Mail}     title="Send the form"                body="Create a client and email them an onboarding form link. They fill in their ICP, target titles, geos, competitors." />
+              <HelpStep n={2} icon={Bot}      title="AI agents run"                body="When the form comes back, four AI agents analyse the answers — research, market demand, ICP, and outreach copy." />
+              <HelpStep n={3} icon={Search}   title="Apollo finds accounts"        body="Apollo is queried with structured filters extracted from the ICP. The GTM Engineer reviews and adds more if needed." />
+              <HelpStep n={4} icon={Users}    title="Client approves"              body="The account list is emailed to the client for sign-off. On approval, the Data Team is auto-notified." />
+              <HelpStep n={5} icon={FileText} title="Data Team enriches contacts"  body="Names, titles, LinkedIn URLs are sourced via Sales Nav, exported to a Google Sheet, and synced into the dashboard." />
+              <HelpStep n={6} icon={Inbox}    title="Ready for campaigns"          body="The client moves to Ready. Outbound can start with verified accounts and contacts." />
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
           {STAGES.map((s) => (
@@ -147,6 +192,21 @@ export default function OnboardingDashboard() {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function HelpStep({ n, icon: Icon, title, body }: { n: number; icon: typeof Inbox; title: string; body: string }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-lg p-3 flex items-start gap-2.5">
+      <div className="shrink-0 w-7 h-7 rounded-lg bg-[#f0e6ff] text-[#6800FF] flex items-center justify-center font-bold text-[11px]">{n}</div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <Icon size={12} className="text-[#6800FF]" />
+          <p className="text-[12px] font-bold text-slate-800">{title}</p>
+        </div>
+        <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">{body}</p>
       </div>
     </div>
   );
