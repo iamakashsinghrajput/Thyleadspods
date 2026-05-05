@@ -18,8 +18,10 @@ function hasUsableEmail(l: PilotLeadRow): boolean {
 }
 
 function isPending(l: PilotLeadRow): boolean {
-  if (!l.claudePrompt) return false;
-  return !(l.body1 && l.body2 && l.body3);
+  const hasPrompt = l.hasPrompt ?? !!l.claudePrompt;
+  if (!hasPrompt) return false;
+  const fullSeq = l.hasFullSequence ?? !!(l.body1 && l.body2 && l.body3);
+  return !fullSeq;
 }
 
 function isEmailReady(l: PilotLeadRow): boolean {
@@ -180,7 +182,7 @@ export default function LeadsTable({ leads, pilotId, onChanged, isTest }: { lead
   }
 
   if (active) {
-    return <LeadDetail lead={active} onBack={() => setActive(null)} />;
+    return <LeadDetail lead={active} onBack={() => setActive(null)} pilotId={pilotId} isTest={!!isTest} />;
   }
 
   return (
@@ -345,7 +347,35 @@ function EmailBadge({ email, status }: { email: string; status: string }) {
   );
 }
 
-function LeadDetail({ lead, onBack }: { lead: PilotLeadRow; onBack: () => void }) {
+function LeadDetail({ lead, onBack, pilotId, isTest }: { lead: PilotLeadRow; onBack: () => void; pilotId?: string; isTest?: boolean }) {
+  const [full, setFull] = useState<{ claudePrompt: string; subject1: string; body1: string; subject2: string; body2: string; subject3: string; body3: string } | null>(null);
+  useEffect(() => {
+    if (!pilotId || !lead.accountDomain || !lead.personKey) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/outbound/pilots/${pilotId}/leads/full?accountDomain=${encodeURIComponent(lead.accountDomain)}&personKey=${encodeURIComponent(lead.personKey)}${isTest ? "&test=1" : ""}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !data.lead) return;
+        setFull({
+          claudePrompt: data.lead.claudePrompt || "",
+          subject1: data.lead.subject1 || "", body1: data.lead.body1 || "",
+          subject2: data.lead.subject2 || "", body2: data.lead.body2 || "",
+          subject3: data.lead.subject3 || "", body3: data.lead.body3 || "",
+        });
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [pilotId, isTest, lead.accountDomain, lead.personKey]);
+
+  const cp = full?.claudePrompt ?? lead.claudePrompt ?? "";
+  const s1 = full?.subject1 ?? lead.subject1 ?? "";
+  const b1 = full?.body1 ?? lead.body1 ?? "";
+  const s2 = full?.subject2 ?? lead.subject2 ?? "";
+  const b2 = full?.body2 ?? lead.body2 ?? "";
+  const s3 = full?.subject3 ?? lead.subject3 ?? "";
+  const b3 = full?.body3 ?? lead.body3 ?? "";
   return (
     <div className="space-y-4">
       <button onClick={onBack} className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-[#6800FF]">
@@ -407,14 +437,16 @@ function LeadDetail({ lead, onBack }: { lead: PilotLeadRow; onBack: () => void }
         </div>
       )}
 
-      {lead.claudePrompt && lead.claudePrompt.length > 0 ? (
-        <ClaudePromptCard prompt={lead.claudePrompt} />
-      ) : (
+      {cp ? (
+        <ClaudePromptCard prompt={cp} />
+      ) : (lead.hasFullSequence || b1 || b2 || b3) ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <BodyCard step={1} subject={lead.subject1} body={lead.body1} />
-          <BodyCard step={2} subject={lead.subject2} body={lead.body2} />
-          <BodyCard step={3} subject={lead.subject3} body={lead.body3} />
+          <BodyCard step={1} subject={s1} body={b1} />
+          <BodyCard step={2} subject={s2} body={b2} />
+          <BodyCard step={3} subject={s3} body={b3} />
         </div>
+      ) : (
+        <p className="text-xs text-slate-500 italic">Loading…</p>
       )}
     </div>
   );
@@ -452,7 +484,7 @@ function ClaudePromptCard({ prompt }: { prompt: string }) {
 }
 
 function PasteMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: PilotLeadRow[]; pilotId: string; onClose: () => void; onChanged?: () => void; isTest?: boolean }) {
-  const queue = useMemo(() => leads.filter((l) => l.claudePrompt), [leads]);
+  const queue = useMemo(() => leads.filter((l) => (l.hasPrompt ?? !!l.claudePrompt)), [leads]);
   const [idx, setIdx] = useState(() => {
     const firstPending = queue.findIndex(isPending);
     return firstPending >= 0 ? firstPending : 0;
@@ -465,16 +497,37 @@ function PasteMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: Pilo
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const lead = queue[idx];
+  const [fullPrompt, setFullPrompt] = useState<string>("");
+  const [fullBodies, setFullBodies] = useState<{ subject1: string; body1: string; subject2: string; body2: string; subject3: string; body3: string } | null>(null);
 
   useEffect(() => {
     setPromptCopied(false);
-    if (lead?.claudePrompt) {
-      navigator.clipboard.writeText(lead.claudePrompt).then(() => {
-        setPromptCopied(true);
-      }).catch(() => {});
-    }
+    setFullPrompt("");
+    setFullBodies(null);
+    if (!lead?.accountDomain || !lead?.personKey) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/outbound/pilots/${pilotId}/leads/full?accountDomain=${encodeURIComponent(lead.accountDomain)}&personKey=${encodeURIComponent(lead.personKey)}${isTest ? "&test=1" : ""}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !data.lead) return;
+        setFullPrompt(data.lead.claudePrompt || "");
+        setFullBodies({
+          subject1: data.lead.subject1 || "", body1: data.lead.body1 || "",
+          subject2: data.lead.subject2 || "", body2: data.lead.body2 || "",
+          subject3: data.lead.subject3 || "", body3: data.lead.body3 || "",
+        });
+        if (data.lead.claudePrompt) {
+          navigator.clipboard.writeText(data.lead.claudePrompt).then(() => {
+            if (!cancelled) setPromptCopied(true);
+          }).catch(() => {});
+        }
+      } catch {}
+    })();
     textareaRef.current?.focus();
-  }, [idx, lead?.accountDomain, lead?.personKey]);
+    return () => { cancelled = true; };
+  }, [idx, lead?.accountDomain, lead?.personKey, pilotId, isTest]);
 
   function navigateTo(newIdx: number) {
     setIdx(newIdx);
@@ -629,7 +682,7 @@ function PasteMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: Pilo
               <Mail size={12} /> Step 1 — Copy this prompt
             </p>
             <div className="flex items-center gap-1.5">
-              <button onClick={() => { navigator.clipboard.writeText(lead.claudePrompt || "").then(() => setPromptCopied(true)); }} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold ${promptCopied ? "bg-emerald-600 text-white" : "bg-[#6800FF] text-white hover:bg-[#5800DD]"}`}>
+              <button onClick={() => { navigator.clipboard.writeText(fullPrompt || "").then(() => setPromptCopied(true)); }} disabled={!fullPrompt} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold disabled:opacity-50 ${promptCopied ? "bg-emerald-600 text-white" : "bg-[#6800FF] text-white hover:bg-[#5800DD]"}`}>
                 {promptCopied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy prompt</>}
               </button>
               <a href="https://claude.ai/projects" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-[11px] font-semibold">
@@ -637,7 +690,7 @@ function PasteMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: Pilo
               </a>
             </div>
           </div>
-          <pre className="p-3 max-h-[420px] overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-800 bg-slate-50">{lead.claudePrompt}</pre>
+          <pre className="p-3 max-h-[420px] overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-800 bg-slate-50">{fullPrompt || (lead.hasPrompt ? "Loading prompt…" : "(no prompt for this lead)")}</pre>
         </div>
 
         <div className="bg-white rounded-2xl border border-emerald-300 ring-1 ring-emerald-100 overflow-hidden">
@@ -659,7 +712,7 @@ function PasteMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: Pilo
             <div className="text-[11px] min-h-[16px]">
               {err && <span className="text-red-700 font-medium">{err}</span>}
               {!err && flashSaved && <span className="text-emerald-700 font-medium inline-flex items-center gap-1"><Check size={11} /> Saved → advancing…</span>}
-              {!err && !flashSaved && lead.body1 && <span className="text-slate-500">Already drafted (saving will overwrite)</span>}
+              {!err && !flashSaved && lead.hasFullSequence && <span className="text-slate-500">Already drafted (saving will overwrite)</span>}
             </div>
             <button
               onClick={save}
@@ -672,13 +725,13 @@ function PasteMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: Pilo
         </div>
       </div>
 
-      {(lead.body1 || lead.body2 || lead.body3) && (
+      {fullBodies && (fullBodies.body1 || fullBodies.body2 || fullBodies.body3) && (
         <details className="bg-white rounded-2xl border border-slate-200 p-3">
           <summary className="text-xs font-bold text-slate-700 cursor-pointer">Current saved drafts (click to preview)</summary>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 mt-3">
-            <BodyCard step={1} subject={lead.subject1} body={lead.body1} />
-            <BodyCard step={2} subject={lead.subject2} body={lead.body2} />
-            <BodyCard step={3} subject={lead.subject3} body={lead.body3} />
+            <BodyCard step={1} subject={fullBodies.subject1} body={fullBodies.body1} />
+            <BodyCard step={2} subject={fullBodies.subject2} body={fullBodies.body2} />
+            <BodyCard step={3} subject={fullBodies.subject3} body={fullBodies.body3} />
           </div>
         </details>
       )}
@@ -687,15 +740,39 @@ function PasteMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: Pilo
 }
 
 function BulkMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: PilotLeadRow[]; pilotId: string; onClose: () => void; onChanged?: () => void; isTest?: boolean }) {
-  const queue = useMemo(() => leads.filter((l) => l.claudePrompt && isPending(l) && hasUsableEmail(l)), [leads]);
+  const queue = useMemo(() => leads.filter((l) => (l.hasPrompt ?? !!l.claudePrompt) && isPending(l) && hasUsableEmail(l)), [leads]);
   const [batchSize, setBatchSize] = useState(20);
   const [batchStart, setBatchStart] = useState(0);
   const [response, setResponse] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [exportCopied, setExportCopied] = useState(false);
+  const [batchPrompts, setBatchPrompts] = useState<Map<string, string>>(new Map());
+  const [loadingBatch, setLoadingBatch] = useState(false);
 
   const batch = useMemo(() => queue.slice(batchStart, batchStart + batchSize), [queue, batchStart, batchSize]);
+
+  useEffect(() => {
+    if (batch.length === 0) return;
+    let cancelled = false;
+    setLoadingBatch(true);
+    (async () => {
+      const keys = batch.map((l) => `${l.accountDomain}::${l.personKey}`).join(",");
+      try {
+        const res = await fetch(`/api/outbound/pilots/${pilotId}/leads/full?keys=${encodeURIComponent(keys)}${isTest ? "&test=1" : ""}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const map = new Map<string, string>();
+        for (const l of (data.leads || []) as Array<{ accountDomain: string; personKey: string; claudePrompt: string }>) {
+          map.set(`${l.accountDomain}::${l.personKey}`, l.claudePrompt || "");
+        }
+        setBatchPrompts(map);
+      } catch {}
+      if (!cancelled) setLoadingBatch(false);
+    })();
+    return () => { cancelled = true; };
+  }, [batch, pilotId, isTest]);
 
   const exportText = useMemo(() => {
     if (batch.length === 0) return "";
@@ -714,17 +791,18 @@ function BulkMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: Pilot
     lines.push(``);
     for (let i = 0; i < batch.length; i++) {
       const l = batch[i];
+      const fullPrompt = batchPrompts.get(`${l.accountDomain}::${l.personKey}`) || l.claudePrompt || "";
       lines.push(`========== LEAD ${i + 1} of ${batch.length} ==========`);
       lines.push(`email: ${l.email}`);
       lines.push(`firstName: ${l.fullName.split(" ")[0] || ""}`);
       lines.push(`lastName: ${l.fullName.split(" ").slice(1).join(" ") || ""}`);
       lines.push(`personKey: ${l.personKey}`);
       lines.push(``);
-      lines.push(l.claudePrompt || "");
+      lines.push(fullPrompt);
       lines.push(``);
     }
     return lines.join("\n");
-  }, [batch]);
+  }, [batch, batchPrompts]);
 
   function copyExport() {
     navigator.clipboard.writeText(exportText).then(() => {
@@ -852,7 +930,7 @@ function BulkMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: Pilot
               <Mail size={12} /> Step 1 — Copy and paste this batch into ChatGPT
             </p>
             <div className="flex items-center gap-1.5">
-              <button onClick={copyExport} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold ${exportCopied ? "bg-emerald-600 text-white" : "bg-sky-600 text-white hover:bg-sky-700"}`}>
+              <button onClick={copyExport} disabled={loadingBatch} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold disabled:opacity-50 ${exportCopied ? "bg-emerald-600 text-white" : "bg-sky-600 text-white hover:bg-sky-700"}`}>
                 {exportCopied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy {batch.length} prompts</>}
               </button>
               <a href="https://chat.openai.com" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-[11px] font-semibold">

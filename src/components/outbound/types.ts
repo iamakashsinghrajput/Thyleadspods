@@ -59,6 +59,8 @@ export interface PilotLeadRow {
   body3: string;
   validationIssues: string[];
   shippable: boolean;
+  hasPrompt?: boolean;
+  hasFullSequence?: boolean;
 }
 
 export interface PilotDetail {

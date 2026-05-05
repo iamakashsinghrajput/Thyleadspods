@@ -57,3 +57,43 @@ export async function sendOtpEmail(to: string, otp: string, type: "verify" | "re
     html,
   });
 }
+
+export interface SendMailInput {
+  to: string | string[];
+  subject: string;
+  html: string;
+  fromName?: string;
+}
+
+export interface SendMailResult {
+  ok: boolean;
+  provider: "nodemailer" | "mock";
+  messageId?: string;
+  error?: string;
+}
+
+export function isMailerLive(): boolean {
+  return !!(process.env.SMTP_USER && process.env.SMTP_PASS);
+}
+
+export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
+  const fromAddr = process.env.SMTP_USER;
+  if (!fromAddr || !process.env.SMTP_PASS) {
+    if (process.env.NODE_ENV !== "production") {
+      const recipients = Array.isArray(input.to) ? input.to.join(", ") : input.to;
+      console.log(`[mailer:mock] to=${recipients} subject="${input.subject}" (SMTP_USER/SMTP_PASS not set)`);
+    }
+    return { ok: true, provider: "mock", messageId: `mock-${Date.now()}` };
+  }
+  try {
+    const info = await transporter.sendMail({
+      from: `"${input.fromName || "Thyleads"}" <${fromAddr}>`,
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+    });
+    return { ok: true, provider: "nodemailer", messageId: info.messageId };
+  } catch (err) {
+    return { ok: false, provider: "nodemailer", error: err instanceof Error ? err.message : "unknown error" };
+  }
+}

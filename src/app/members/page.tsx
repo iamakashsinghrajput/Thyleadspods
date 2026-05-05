@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, Trash2, UserMinus, Shield, AlertTriangle, Check, X, RefreshCcw, UserPlus, Clock } from "lucide-react";
+import { Search, Trash2, UserMinus, Shield, AlertTriangle, Check, X, RefreshCcw, UserPlus, Clock, Send, Loader2, Copy } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { usePods } from "@/lib/pod-context";
 
@@ -33,6 +33,12 @@ export default function MembersPage() {
   const [q, setQ] = useState("");
   const [busyId, setBusyId] = useState<string>("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string>("");
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviteName, setInviteName] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"admin" | "pod" | "client">("pod");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteResult, setInviteResult] = useState<{ kind: "ok" | "err"; text: string; url?: string } | null>(null);
 
   const isSuperadmin = user?.role === "superadmin";
 
@@ -63,6 +69,40 @@ export default function MembersPage() {
   }
 
   useEffect(() => { if (hydrated && isSuperadmin) fetchMembers(); }, [hydrated, isSuperadmin, user?.email]);
+
+  async function sendInvite() {
+    if (!user?.email) return;
+    if (!inviteName.trim() || !inviteEmail.trim()) {
+      setInviteResult({ kind: "err", text: "Name and email required" });
+      return;
+    }
+    setInviteBusy(true);
+    setInviteResult(null);
+    try {
+      const res = await fetch(`/api/users/invite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor: user.email, name: inviteName.trim(), email: inviteEmail.trim().toLowerCase(), role: inviteRole, podId: "" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setInviteResult({ kind: "err", text: data.error || `Failed (${res.status})` });
+      } else {
+        const sent = data.invite?.sent;
+        const provider = data.invite?.provider;
+        const note = sent
+          ? (provider === "mock" ? "Invite created (email mocked — SMTP_USER/SMTP_PASS not set; use the dev URL below)." : `Invite emailed via ${provider} to ${data.email}.`)
+          : `Invite created but email failed: ${data.invite?.error || "unknown"}.`;
+        setInviteResult({ kind: "ok", text: note, url: data.inviteUrl });
+        setInviteName("");
+        setInviteEmail("");
+        fetchMembers();
+      }
+    } catch (e) {
+      setInviteResult({ kind: "err", text: e instanceof Error ? e.message : "Network error" });
+    }
+    setInviteBusy(false);
+  }
 
   async function decidePending(p: PendingRow, action: "approve" | "reject") {
     if (!user?.email) return;
@@ -176,11 +216,61 @@ export default function MembersPage() {
               className="pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/15 w-64"
             />
           </div>
+          <button onClick={() => { setShowInvite((v) => !v); setInviteResult(null); }} className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#6800FF] hover:bg-[#5800DD] text-white text-xs font-semibold rounded-lg">
+            <UserPlus size={13} /> Invite member
+          </button>
           <button onClick={fetchMembers} disabled={loading} className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:border-slate-300 text-slate-700 text-xs font-semibold rounded-lg disabled:opacity-50">
             <RefreshCcw size={13} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
         </div>
       </div>
+
+      {showInvite && (
+        <div className="bg-white rounded-2xl border border-[#6800FF]/30 ring-1 ring-[#6800FF]/10 p-4 space-y-3 max-w-2xl">
+          <p className="text-sm font-bold text-slate-900 inline-flex items-center gap-1.5">
+            <UserPlus size={14} className="text-[#6800FF]" /> Invite a Thyleads employee
+          </p>
+          <p className="text-[11px] text-slate-500">Sends a one-time invitation email. They can sign in with their Google Workspace account or set a password from the link.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="sm:col-span-1">
+              <label className="text-[11px] font-medium text-slate-600">Name</label>
+              <input type="text" value={inviteName} onChange={(e) => setInviteName(e.target.value)} placeholder="Riya Sharma" className="w-full mt-1 px-2.5 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:border-[#6800FF]" />
+            </div>
+            <div className="sm:col-span-1">
+              <label className="text-[11px] font-medium text-slate-600">Google Workspace email</label>
+              <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="riya@thyleads.com" className="w-full mt-1 px-2.5 py-1.5 border border-slate-200 rounded text-sm font-mono focus:outline-none focus:border-[#6800FF]" />
+            </div>
+            <div className="sm:col-span-1">
+              <label className="text-[11px] font-medium text-slate-600">Role</label>
+              <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as "admin" | "pod" | "client")} className="w-full mt-1 px-2.5 py-1.5 border border-slate-200 rounded text-sm focus:outline-none focus:border-[#6800FF]">
+                <option value="pod">pod</option>
+                <option value="admin">admin</option>
+                <option value="client">client</option>
+              </select>
+            </div>
+          </div>
+          {inviteResult && (
+            <div className={`text-[11px] rounded-lg px-3 py-2 inline-flex items-start gap-1.5 ${inviteResult.kind === "ok" ? "bg-emerald-50 border border-emerald-200 text-emerald-800" : "bg-red-50 border border-red-200 text-red-700"}`}>
+              {inviteResult.kind === "ok" ? <Check size={12} className="mt-0.5 shrink-0" /> : <AlertTriangle size={12} className="mt-0.5 shrink-0" />}
+              <div>
+                <p>{inviteResult.text}</p>
+                {inviteResult.url && (
+                  <p className="mt-1 inline-flex items-center gap-1.5 font-mono text-[10px] break-all">
+                    <a href={inviteResult.url} target="_blank" rel="noreferrer" className="underline">{inviteResult.url}</a>
+                    <button onClick={() => navigator.clipboard.writeText(inviteResult.url || "")} className="text-slate-500 hover:text-slate-800" title="Copy link"><Copy size={10} /></button>
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button onClick={sendInvite} disabled={inviteBusy || !inviteName.trim() || !inviteEmail.trim()} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#6800FF] hover:bg-[#5800DD] disabled:opacity-50 text-white text-xs font-semibold rounded-md">
+              {inviteBusy ? <><Loader2 size={12} className="animate-spin" /> Sending…</> : <><Send size={12} /> Send invite</>}
+            </button>
+            <button onClick={() => { setShowInvite(false); setInviteResult(null); }} className="text-xs font-medium text-slate-500 hover:text-slate-800">Cancel</button>
+          </div>
+        </div>
+      )}
 
       {err && (
         <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700 inline-flex items-center gap-1.5">

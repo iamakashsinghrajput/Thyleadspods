@@ -17,12 +17,31 @@ interface PilotDoc {
   totalLlmTokensIn?: number;
   totalLlmTokensOut?: number;
   finalCsv?: string;
+  hasCsv?: boolean;
   createdBy?: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
+interface PhaseLite { key?: string; status?: string; startedAt?: Date | string | null; completedAt?: Date | string | null; durationMs?: number; inputCount?: number; outputCount?: number; error?: string; apolloCreditsUsed?: number; llmTokensIn?: number; llmTokensOut?: number }
+
 function serialize(d: PilotDoc) {
+  const phases = (Array.isArray(d.phases) ? d.phases : []) as PhaseLite[];
+  const slim = phases.map((p) => ({
+    key: p.key || "",
+    status: p.status || "pending",
+    startedAt: p.startedAt || null,
+    completedAt: p.completedAt || null,
+    durationMs: p.durationMs || 0,
+    inputCount: p.inputCount || 0,
+    outputCount: p.outputCount || 0,
+    metrics: {},
+    log: [],
+    error: p.error || "",
+    apolloCreditsUsed: p.apolloCreditsUsed || 0,
+    llmTokensIn: p.llmTokensIn || 0,
+    llmTokensOut: p.llmTokensOut || 0,
+  }));
   return {
     id: String(d._id),
     clientName: d.clientName || "VWO",
@@ -30,30 +49,67 @@ function serialize(d: PilotDoc) {
     status: d.status || "draft",
     config: d.config || {},
     inputs: d.inputs || {},
-    phases: ensurePhases(d.phases as never),
+    phases: ensurePhases(slim as never),
     totalApolloCredits: d.totalApolloCredits || 0,
     totalLlmTokensIn: d.totalLlmTokensIn || 0,
     totalLlmTokensOut: d.totalLlmTokensOut || 0,
-    hasCsv: !!d.finalCsv,
+    hasCsv: !!d.hasCsv,
     createdBy: d.createdBy || "",
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
   };
 }
 
+const LEAD_LIST_PROJECTION = {
+  accountDomain: 1, personKey: 1,
+  companyShort: 1, industry: 1, country: 1,
+  score: 1, segment: 1, rank: 1,
+  fullName: 1, contactTitle: 1,
+  email: 1, emailStatus: 1,
+  observationAngle: 1, theirCustomers: 1, whatTheySell: 1, theirStage: 1,
+  topPain: 1, valueAngle: 1, socialProofMatch: 1, subjectTopic: 1,
+  subject1: 1, subject2: 1, subject3: 1,
+  validationIssues: 1, shippable: 1,
+  claudePromptLen: { $strLenCP: { $ifNull: ["$claudePrompt", ""] } },
+  body1Len: { $strLenCP: { $ifNull: ["$body1", ""] } },
+  body2Len: { $strLenCP: { $ifNull: ["$body2", ""] } },
+  body3Len: { $strLenCP: { $ifNull: ["$body3", ""] } },
+} as const;
+
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   await connectDB();
   const { id } = await ctx.params;
-  const doc = (await OutboundPilot.findById(id).lean()) as PilotDoc | null;
-  if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
-
   const testPilotId = `${id}__test`;
-  const [accounts, leads, testAccounts, testLeads] = await Promise.all([
-    OutboundAccount.find({ pilotId: id }).sort({ score: -1 }).limit(200).lean(),
-    OutboundLead.find({ pilotId: id }).sort({ rank: 1 }).lean(),
-    OutboundAccount.find({ pilotId: testPilotId }).sort({ score: -1 }).limit(50).lean(),
-    OutboundLead.find({ pilotId: testPilotId }).sort({ rank: 1 }).lean(),
+
+  const [pilotAgg, accounts, leads, testAccounts, testLeads] = await Promise.all([
+    OutboundPilot.aggregate([
+      { $match: { _id: new (await import("mongoose")).default.Types.ObjectId(id) } },
+      { $project: {
+        clientName: 1, pilotName: 1, status: 1,
+        config: 1, inputs: 1,
+        totalApolloCredits: 1, totalLlmTokensIn: 1, totalLlmTokensOut: 1,
+        createdBy: 1, createdAt: 1, updatedAt: 1,
+        hasCsv: { $gt: [{ $strLenCP: { $ifNull: ["$finalCsv", ""] } }, 0] },
+        phases: 1,
+      } },
+      { $limit: 1 },
+    ]),
+    OutboundAccount.find({ pilotId: id }).sort({ score: -1 }).limit(200).select({ domain: 1, name: 1, industry: 1, country: 1, estimatedNumEmployees: 1, score: 1, segment: 1, rank: 1, keywords: 1 }).lean(),
+    OutboundLead.aggregate([
+      { $match: { pilotId: id } },
+      { $sort: { rank: 1 } },
+      { $project: LEAD_LIST_PROJECTION },
+    ]),
+    OutboundAccount.find({ pilotId: testPilotId }).sort({ score: -1 }).limit(50).select({ domain: 1, name: 1, industry: 1, country: 1, estimatedNumEmployees: 1, score: 1, segment: 1, rank: 1, keywords: 1 }).lean(),
+    OutboundLead.aggregate([
+      { $match: { pilotId: testPilotId } },
+      { $sort: { rank: 1 } },
+      { $project: LEAD_LIST_PROJECTION },
+    ]),
   ]);
+
+  const doc = (pilotAgg[0] || null) as PilotDoc | null;
+  if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const mapAccount = (a: Record<string, unknown>) => ({
     domain: a.domain as string,
@@ -66,37 +122,45 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     rank: (a.rank as number) || 0,
     keywords: ((a.keywords as string[]) || []).slice(0, 5),
   });
-  const mapLead = (l: Record<string, unknown>) => ({
-    accountDomain: l.accountDomain as string,
-    personKey: (l.personKey as string) || "",
-    companyShort: (l.companyShort as string) || "",
-    industry: (l.industry as string) || "",
-    country: (l.country as string) || "",
-    score: (l.score as number) || 0,
-    segment: (l.segment as string) || "",
-    rank: (l.rank as number) || 0,
-    fullName: (l.fullName as string) || "",
-    contactTitle: (l.contactTitle as string) || "",
-    email: (l.email as string) || "",
-    emailStatus: (l.emailStatus as string) || "",
-    observationAngle: (l.observationAngle as string) || "",
-    theirCustomers: (l.theirCustomers as string) || "",
-    whatTheySell: (l.whatTheySell as string) || "",
-    theirStage: (l.theirStage as string) || "",
-    topPain: (l.topPain as string) || "",
-    valueAngle: (l.valueAngle as string) || "",
-    socialProofMatch: (l.socialProofMatch as string[]) || [],
-    subjectTopic: (l.subjectTopic as string) || "",
-    claudePrompt: (l.claudePrompt as string) || "",
-    subject1: (l.subject1 as string) || "",
-    body1: (l.body1 as string) || "",
-    subject2: (l.subject2 as string) || "",
-    body2: (l.body2 as string) || "",
-    subject3: (l.subject3 as string) || "",
-    body3: (l.body3 as string) || "",
-    validationIssues: (l.validationIssues as string[]) || [],
-    shippable: !!l.shippable,
-  });
+  const mapLead = (l: Record<string, unknown>) => {
+    const promptLen = (l.claudePromptLen as number) || 0;
+    const b1 = (l.body1Len as number) || 0;
+    const b2 = (l.body2Len as number) || 0;
+    const b3 = (l.body3Len as number) || 0;
+    return {
+      accountDomain: l.accountDomain as string,
+      personKey: (l.personKey as string) || "",
+      companyShort: (l.companyShort as string) || "",
+      industry: (l.industry as string) || "",
+      country: (l.country as string) || "",
+      score: (l.score as number) || 0,
+      segment: (l.segment as string) || "",
+      rank: (l.rank as number) || 0,
+      fullName: (l.fullName as string) || "",
+      contactTitle: (l.contactTitle as string) || "",
+      email: (l.email as string) || "",
+      emailStatus: (l.emailStatus as string) || "",
+      observationAngle: (l.observationAngle as string) || "",
+      theirCustomers: (l.theirCustomers as string) || "",
+      whatTheySell: (l.whatTheySell as string) || "",
+      theirStage: (l.theirStage as string) || "",
+      topPain: (l.topPain as string) || "",
+      valueAngle: (l.valueAngle as string) || "",
+      socialProofMatch: (l.socialProofMatch as string[]) || [],
+      subjectTopic: (l.subjectTopic as string) || "",
+      claudePrompt: "",
+      subject1: (l.subject1 as string) || "",
+      body1: "",
+      subject2: (l.subject2 as string) || "",
+      body2: "",
+      subject3: (l.subject3 as string) || "",
+      body3: "",
+      validationIssues: (l.validationIssues as string[]) || [],
+      shippable: !!l.shippable,
+      hasPrompt: promptLen > 0,
+      hasFullSequence: b1 > 0 && b2 > 0 && b3 > 0,
+    };
+  };
 
   return NextResponse.json({
     pilot: serialize(doc),
