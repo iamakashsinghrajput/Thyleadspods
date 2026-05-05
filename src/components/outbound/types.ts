@@ -65,4 +65,6 @@ export interface PilotDetail {
   pilot: PilotSummary;
   accounts: PilotAccountRow[];
   leads: PilotLeadRow[];
+  testAccounts?: PilotAccountRow[];
+  testLeads?: PilotLeadRow[];
 }

@@ -284,7 +284,7 @@ class PipelineCancelled extends Error {
   constructor() { super("Pipeline cancelled by user"); this.name = "PipelineCancelled"; }
 }
 
-export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey; startFrom?: PhaseKey } = {}): Promise<void> {
+export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey; startFrom?: PhaseKey; testLimit?: number } = {}): Promise<void> {
   await OutboundPilot.findByIdAndUpdate(pilotId, {
     cancelRequested: false,
     cancelRequestedAt: null,
@@ -338,6 +338,8 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
     pastMeetingTokens?: string[];
   };
 
+  const dataPilotId = opts.testLimit ? `${pilotId}__test` : pilotId;
+
   let stopAfterReached = false;
   function shouldStop(after: PhaseKey): boolean {
     if (!opts.stopAfter) return false;
@@ -382,10 +384,11 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
   const subset = startIdx > phaseIndex("subset")
     ? { subset: [] as string[], batches: [] as string[][], priorityCount: 0, comD2cCount: 0, otherCount: 0 }
     : await runPhase(pilotId, "subset", () => {
+        const subsetCap = opts.testLimit ? Math.max(opts.testLimit * 3, 30) : (config.enrichSubsetCap || 1500);
         const r = subsetAgent({
           eligible: filter.eligible,
           priorityTlds: config.priorityTlds || ["in", "co.in", "ac.in", "org.in", "net.in", "bank.in"],
-          enrichSubsetCap: config.enrichSubsetCap || 1500,
+          enrichSubsetCap: subsetCap,
         });
         return { state: r.state, result: r.output };
       });
@@ -393,11 +396,11 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
 
   const enrich = startIdx > phaseIndex("enrich")
     ? await (async () => {
-        const docs = (await OutboundAccount.find({ pilotId }).lean()) as unknown as Array<Record<string, unknown>>;
+        const docs = (await OutboundAccount.find({ pilotId: dataPilotId }).lean()) as unknown as Array<Record<string, unknown>>;
         return { enriched: docs.map(toEnrichedAccount), unmatched: [] as string[], creditsUsed: 0, cacheHits: 0, searchHits: 0, fullEnrichHits: 0 };
       })()
     : await runPhase(pilotId, "enrich", async ({ signal }) => {
-        const existingDocs = (await OutboundAccount.find({ pilotId }).lean()) as unknown as Array<Record<string, unknown>>;
+        const existingDocs = (await OutboundAccount.find({ pilotId: dataPilotId }).lean()) as unknown as Array<Record<string, unknown>>;
         const existingMap = new Map<string, ReturnType<typeof toEnrichedAccount>>();
         for (const doc of existingDocs) {
           const d = String(doc.domain || "").toLowerCase().trim();
@@ -411,8 +414,8 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
             const domain = (e.domain || "").toLowerCase().trim();
             if (!domain) continue;
             await OutboundAccount.updateOne(
-              { pilotId, domain },
-              { $set: { ...e, domain, pilotId, enriched: fullyEnriched } },
+              { pilotId: dataPilotId, domain },
+              { $set: { ...e, domain, pilotId: dataPilotId, enriched: fullyEnriched } },
               { upsert: true },
             );
           }
@@ -433,7 +436,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
   if (shouldStop("enrich")) { await OutboundPilot.findByIdAndUpdate(pilotId, { status: "paused", updatedAt: new Date() }); return; }
 
   const score = startIdx > phaseIndex("score")
-    ? await loadScoredAccountsForPilot(pilotId)
+    ? await loadScoredAccountsForPilot(dataPilotId)
     : await runPhase(pilotId, "score", async () => {
         const cfg = config as Record<string, unknown>;
         const projectData = {
@@ -465,8 +468,8 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
           enriched: enrich.enriched,
           config: scoringConfig,
           projectData,
-          topN: Number.MAX_SAFE_INTEGER,
-          maxPerIndustry: Number.MAX_SAFE_INTEGER,
+          topN: opts.testLimit || Number.MAX_SAFE_INTEGER,
+          maxPerIndustry: opts.testLimit || Number.MAX_SAFE_INTEGER,
         });
 
         const rankByDomain = new Map<string, number>();
@@ -476,7 +479,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
 
         const ops = r.output.all.map((a) => ({
           updateOne: {
-            filter: { pilotId, domain: a.domain },
+            filter: { pilotId: dataPilotId, domain: a.domain },
             update: {
               $set: {
                 score: a.score,
@@ -513,7 +516,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
 
   const stakeholder = startIdx > phaseIndex("stakeholder")
     ? await (async () => {
-        const loaded = await loadLeadsForPilot(pilotId, score.top);
+        const loaded = await loadLeadsForPilot(dataPilotId, score.top);
         return {
           rows: loaded.map((l) => ({ account: l.account, stakeholder: l.stakeholder })),
           found: loaded.filter((l) => l.stakeholder).length,
@@ -522,8 +525,8 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
       })()
     : await runPhase(pilotId, "stakeholder", async ({ signal }) => {
         const newDomainSet = new Set(score.top.map((t) => (t.domain || "").toLowerCase().trim()).filter(Boolean));
-        await OutboundLead.deleteMany({ pilotId, accountDomain: { $nin: Array.from(newDomainSet) } });
-        await OutboundLead.deleteMany({ pilotId, accountDomain: { $in: Array.from(newDomainSet) } });
+        await OutboundLead.deleteMany({ pilotId: dataPilotId, accountDomain: { $nin: Array.from(newDomainSet) } });
+        await OutboundLead.deleteMany({ pilotId: dataPilotId, accountDomain: { $in: Array.from(newDomainSet) } });
 
         async function persistAccount(row: { account: ScoredAccount; stakeholder: Stakeholder | null }, i: number) {
           const a = row.account;
@@ -532,9 +535,9 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
           if (!domain) return;
           const personKey = s?.personKey || "";
           if (!personKey) return;
-          await OutboundLead.updateOne({ pilotId, accountDomain: domain, personKey }, {
+          await OutboundLead.updateOne({ pilotId: dataPilotId, accountDomain: domain, personKey }, {
             $set: {
-              pilotId, accountDomain: domain, personKey,
+              pilotId: dataPilotId, accountDomain: domain, personKey,
               companyShort: a.name, companyFull: a.name,
               industry: a.industry, employees: a.estimatedNumEmployees,
               country: a.country, score: a.score, segment: a.segment,
@@ -563,7 +566,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
 
   const emailMatch = startIdx > phaseIndex("email_match")
     ? await (async () => {
-        const loaded = await loadLeadsForPilot(pilotId, score.top);
+        const loaded = await loadLeadsForPilot(dataPilotId, score.top);
         const results: { domain: string; personKey: string; email: LeadEmail }[] = [];
         let verifiedCount = 0, likelyCount = 0, unavailableCount = 0;
         for (const l of loaded) {
@@ -576,7 +579,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
         return { results, creditsUsed: 0, verifiedCount, likelyCount, unavailableCount, cacheHits: results.length };
       })()
     : await runPhase(pilotId, "email_match", async ({ signal }) => {
-    const existingLeads = (await OutboundLead.find({ pilotId, email: { $ne: "" } }).lean()) as unknown as Array<Record<string, unknown>>;
+    const existingLeads = (await OutboundLead.find({ pilotId: dataPilotId, email: { $ne: "" } }).lean()) as unknown as Array<Record<string, unknown>>;
     const existingEmails = new Map<string, LeadEmail>();
     for (const lead of existingLeads) {
       const dom = String(lead.accountDomain || "").toLowerCase().trim();
@@ -591,7 +594,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
 
     async function persistEmails(rows: { domain: string; personKey: string; email: LeadEmail }[]) {
       for (const e of rows) {
-        await OutboundLead.updateOne({ pilotId, accountDomain: e.domain, personKey: e.personKey }, {
+        await OutboundLead.updateOne({ pilotId: dataPilotId, accountDomain: e.domain, personKey: e.personKey }, {
           $set: { email: e.email.email, emailStatus: e.email.emailStatus, updatedAt: new Date() },
         });
       }
@@ -621,7 +624,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
 
   const research = startIdx > phaseIndex("research")
     ? await (async () => {
-        const loaded = await loadLeadsForPilot(pilotId, score.top);
+        const loaded = await loadLeadsForPilot(dataPilotId, score.top);
         const notes: { domain: string; research: LeadResearch }[] = [];
         for (const l of loaded) {
           if (l.research) notes.push({ domain: l.account.domain, research: l.research });
@@ -629,7 +632,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
         return { notes, llmTokensIn: 0, llmTokensOut: 0, tavilyCalls: 0, cacheHits: notes.length };
       })()
     : await runPhase(pilotId, "research", async ({ signal }) => {
-        const existingLeads = (await OutboundLead.find({ pilotId, observationAngle: { $ne: "" } }).lean()) as unknown as Array<Record<string, unknown>>;
+        const existingLeads = (await OutboundLead.find({ pilotId: dataPilotId, observationAngle: { $ne: "" } }).lean()) as unknown as Array<Record<string, unknown>>;
         const existingNotes = new Map<string, LeadResearch>();
         for (const lead of existingLeads) {
           const dom = String(lead.accountDomain || "").toLowerCase().trim();
@@ -651,7 +654,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
         }
 
         async function persistNote(n: { domain: string; research: LeadResearch }) {
-          await OutboundLead.updateMany({ pilotId, accountDomain: n.domain }, {
+          await OutboundLead.updateMany({ pilotId: dataPilotId, accountDomain: n.domain }, {
             $set: {
               observationAngle: n.research.observationAngle,
               secondaryObservation: n.research.secondaryObservation,
@@ -733,7 +736,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
     });
     const pr = promptBuildAgent({ rows: promptRows, sellerName: config.sellerName || "VWO" });
     for (const p of pr.output.prompts) {
-      await OutboundLead.updateOne({ pilotId, accountDomain: p.domain, personKey: p.personKey }, {
+      await OutboundLead.updateOne({ pilotId: dataPilotId, accountDomain: p.domain, personKey: p.personKey }, {
         $set: { claudePrompt: p.prompt, updatedAt: new Date() },
       });
     }
@@ -742,7 +745,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
   if (shouldStop("draft")) { await OutboundPilot.findByIdAndUpdate(pilotId, { status: "paused", updatedAt: new Date() }); return; }
 
   await runPhase(pilotId, "validate", async () => {
-    const leads = (await OutboundLead.find({ pilotId, claudePrompt: { $ne: "" } }).lean()) as unknown as Array<Record<string, unknown>>;
+    const leads = (await OutboundLead.find({ pilotId: dataPilotId, claudePrompt: { $ne: "" } }).lean()) as unknown as Array<Record<string, unknown>>;
     const promptInputs = leads.map((l) => ({
       domain: String(l.accountDomain || ""),
       personKey: String(l.personKey || ""),
@@ -752,7 +755,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
     }));
     const r = validateAgent({ prompts: promptInputs });
     for (const rep of r.output.reports) {
-      await OutboundLead.updateOne({ pilotId, accountDomain: rep.domain, personKey: rep.personKey }, {
+      await OutboundLead.updateOne({ pilotId: dataPilotId, accountDomain: rep.domain, personKey: rep.personKey }, {
         $set: {
           validationIssues: rep.shippable ? [] : [rep.reason],
           shippable: rep.shippable,
@@ -765,7 +768,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
   if (shouldStop("validate")) { await OutboundPilot.findByIdAndUpdate(pilotId, { status: "paused", updatedAt: new Date() }); return; }
 
   const exportOut = await runPhase(pilotId, "export", async () => {
-    const leadDocs = (await OutboundLead.find({ pilotId }).sort({ rank: 1 }).lean()) as unknown as Array<Record<string, unknown>>;
+    const leadDocs = (await OutboundLead.find({ pilotId: dataPilotId }).sort({ rank: 1 }).lean()) as unknown as Array<Record<string, unknown>>;
     const accountByDomain = new Map(score.top.map((t) => [t.domain, t] as const));
     const str = (v: unknown) => typeof v === "string" ? v : "";
     const num = (v: unknown) => typeof v === "number" ? v : Number(v) || 0;
@@ -814,7 +817,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
   });
 }
 
-export async function runPipelineSafe(pilotId: string, opts: { stopAfter?: PhaseKey; startFrom?: PhaseKey } = {}): Promise<void> {
+export async function runPipelineSafe(pilotId: string, opts: { stopAfter?: PhaseKey; startFrom?: PhaseKey; testLimit?: number } = {}): Promise<void> {
   try {
     await runPipeline(pilotId, opts);
   } catch (err) {

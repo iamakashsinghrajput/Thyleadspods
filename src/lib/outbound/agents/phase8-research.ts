@@ -1,5 +1,6 @@
 import { llm, extractJson } from "@/lib/onboarding/llm";
 import { tavilySearch, isTavilyLive, summarizeForObservation } from "../tavily";
+import { coreSignalSnapshot, isCoreSignalLive, summarizeCoreSignal } from "../coresignal";
 import type { LeadResearch, PhaseState, ScoredAccount, Stakeholder } from "../types";
 
 export interface ClientBrief {
@@ -120,13 +121,13 @@ For every account you receive, you must:
 
 1. UNDERSTAND who this account actually is — what they sell, who they sell to (their customers), what stage they're at (early growth, scale-up, mature, listed, etc.), what their growth motion looks like.
 2. CHECK against the seller's "anti_icp" — if the prospect matches anti-ICP (wrong stage, wrong size, wrong segment, in the seller's anti-list), set top_pain to "ANTI-ICP: <reason>" and skip steps 3-5; downstream the system will flag this lead.
-3. IDENTIFY the single most likely pain point they're feeling RIGHT NOW. Pick from the seller's "common_pains_solved" list when there's a match — these are the pains the seller actually solves. Then specialize that pain to THIS prospect's situation (their stage + their customers + any signals in Tavily research).
+3. IDENTIFY the single most likely pain point they're feeling RIGHT NOW. Pick from the seller's "common_pains_solved" list when there's a match — these are the pains the seller actually solves. Then specialize that pain to THIS prospect's situation (their stage + their customers + any signals in Tavily research and CoreSignal data — use CoreSignal job postings, headcount growth, funding, and tech-stack as primary intent signals; they're more reliable than web search snippets).
 4. CONNECT that pain to a specific value from the seller's "capabilities" + "usps". The "value_angle" you produce should reference the most relevant capability by name and (if relevant) one USP the prospect would care about.
 5. PICK three social-proof brands. Strongly prefer entries from "case_study_wins" that match the prospect's segment — quote the metric where possible. Fall back to "social_proof_roster" entries when no case-study match exists.
 6. DRAFT a soft observation tied to their actual product — something a real human SDR would notice from looking at their site for 60 seconds, framed in the seller's vocabulary.
 
 Hard rules:
-- Never invent metrics, customers, or facts the Tavily research and the brief don't support.
+- Never invent metrics, customers, or facts the Tavily research, CoreSignal data, or the brief don't support.
 - Never lead with news/funding ("Series C", "acquisition", "new CEO") in the observation.
 - The observation must be true of their site/product but expressed softly — category-level wording is fine if the Tavily notes are thin.
 - The pain point and value angle must be SPECIFIC TO THEM, not industry-generic. If you'd write the same pain for any company in this industry, you haven't done the work.
@@ -153,34 +154,53 @@ async function researchOneLead(
   brief: ClientBrief | undefined,
   sellerName: string,
   signal?: AbortSignal,
-): Promise<{ research: LeadResearch; tokensIn: number; tokensOut: number; tavilyUsed: boolean; tavilyError?: string }> {
+): Promise<{ research: LeadResearch; tokensIn: number; tokensOut: number; tavilyUsed: boolean; coreSignalUsed: boolean; tavilyError?: string; coreSignalError?: string }> {
   let businessNotes = "";
   let growthNotes = "";
+  let coreSignalNotes = "";
   let tavilyUsed = false;
+  let coreSignalUsed = false;
   let tavilyError: string | undefined;
+  let coreSignalError: string | undefined;
 
-  if (useTavily) {
-    try {
-      const businessSearch = await tavilySearch(
-        `${row.account.name} ${row.account.domain} customers products business model what they do`,
-        { searchDepth: "advanced", maxResults: 4, signal },
-      );
-      businessNotes = summarizeForObservation(row.account.domain, businessSearch);
-      tavilyUsed = true;
-    } catch (err) {
-      tavilyError = err instanceof Error ? err.message : "unknown";
-    }
-    if (!tavilyError) {
-      try {
-        const growthSearch = await tavilySearch(
+  const coreSignalLive = isCoreSignalLive();
+  const tavilyAndCoreSignal = await Promise.allSettled([
+    useTavily
+      ? tavilySearch(
+          `${row.account.name} ${row.account.domain} customers products business model what they do`,
+          { searchDepth: "advanced", maxResults: 4, signal },
+        )
+      : Promise.reject(new Error("tavily disabled")),
+    useTavily
+      ? tavilySearch(
           `${row.account.name} growth funding hiring expansion challenges scale conversion`,
           { searchDepth: "advanced", maxResults: 4, signal },
-        );
-        growthNotes = summarizeForObservation(row.account.domain, growthSearch);
-      } catch (err) {
-        if (!tavilyError) tavilyError = err instanceof Error ? err.message : "unknown";
-      }
-    }
+        )
+      : Promise.reject(new Error("tavily disabled")),
+    coreSignalLive
+      ? coreSignalSnapshot(row.account.domain, signal)
+      : Promise.reject(new Error("coresignal disabled")),
+  ]);
+
+  const [biz, growth, csnap] = tavilyAndCoreSignal;
+  if (biz.status === "fulfilled") {
+    businessNotes = summarizeForObservation(row.account.domain, biz.value);
+    tavilyUsed = true;
+  } else if (useTavily) {
+    tavilyError = biz.reason instanceof Error ? biz.reason.message : "unknown";
+  }
+  if (growth.status === "fulfilled") {
+    growthNotes = summarizeForObservation(row.account.domain, growth.value);
+    tavilyUsed = true;
+  } else if (useTavily && !tavilyError) {
+    tavilyError = growth.reason instanceof Error ? growth.reason.message : "unknown";
+  }
+  if (csnap.status === "fulfilled") {
+    coreSignalNotes = summarizeCoreSignal(csnap.value);
+    coreSignalUsed = csnap.value.company !== null || csnap.value.recentJobs.length > 0;
+    if (!coreSignalUsed && csnap.value.errors.length > 0) coreSignalError = csnap.value.errors[0];
+  } else if (coreSignalLive) {
+    coreSignalError = csnap.reason instanceof Error ? csnap.reason.message : "unknown";
   }
 
   const userPayload = {
@@ -214,6 +234,7 @@ async function researchOneLead(
     },
     tavily_business_research: businessNotes || "(no business research available)",
     tavily_growth_research: growthNotes || "(no growth research available)",
+    coresignal_signals: coreSignalNotes || "(no CoreSignal data available)",
   };
 
   const fallback = fallbackResearch(row.account.domain, row.account.industry);
@@ -272,7 +293,9 @@ async function researchOneLead(
     tokensIn: result.inputTokens,
     tokensOut: result.outputTokens,
     tavilyUsed,
+    coreSignalUsed,
     tavilyError,
+    coreSignalError,
   };
 }
 
@@ -281,16 +304,19 @@ export async function researchAgent(input: ResearchInput): Promise<{ output: Res
   const notes: { domain: string; research: LeadResearch }[] = [];
   const useAi = input.useAi === true;
   const tavilyAvailable = useAi && isTavilyLive();
+  const coreSignalAvailable = useAi && isCoreSignalLive();
   const tavilyBudget = input.tavilyMaxLeads ?? 30;
   const cache = input.existingNotes || new Map<string, LeadResearch>();
 
   if (!useAi) {
-    log.push("Deterministic mode: zero LLM/Tavily cost. Per-industry observation table only.");
+    log.push("Deterministic mode: zero LLM/Tavily/CoreSignal cost. Per-industry observation table only.");
   } else {
     log.push(tavilyAvailable ? `Tavily live. Budget: up to ${tavilyBudget} per-lead searches (Tier A+B).` : "Tavily mock: TAVILY_API_KEY not set, using category-level fallbacks.");
+    log.push(coreSignalAvailable ? `CoreSignal live: structured signals (jobs, headcount, funding, tech) on top of Tavily.` : "CoreSignal off: CORESIGNAL_API_KEY not set.");
   }
 
   let tokensIn = 0, tokensOut = 0, tavilyCalls = 0, cacheHits = 0, tavilyErrors = 0;
+  let coreSignalCalls = 0, coreSignalErrors = 0;
 
   if (!useAi) {
     for (const row of input.rows) {
@@ -348,6 +374,11 @@ export async function researchAgent(input: ResearchInput): Promise<{ output: Res
       tavilyErrors++;
       if (tavilyErrors <= 3) log.push(`Tavily failed for ${domain}: ${r.tavilyError}`);
     }
+    if (r.coreSignalUsed) coreSignalCalls++;
+    if (r.coreSignalError) {
+      coreSignalErrors++;
+      if (coreSignalErrors <= 3) log.push(`CoreSignal failed for ${domain}: ${r.coreSignalError}`);
+    }
 
     const note = { domain, research: r.research };
     notes.push(note);
@@ -358,13 +389,13 @@ export async function researchAgent(input: ResearchInput): Promise<{ output: Res
     }
   }
 
-  log.push(`Generated ${notes.length} observation sets. Cache hits: ${cacheHits}. Tavily calls: ${tavilyCalls}${tavilyErrors > 0 ? ` (${tavilyErrors} errors)` : ""}. LLM tokens in/out: ${tokensIn}/${tokensOut}.`);
+  log.push(`Generated ${notes.length} observation sets. Cache hits: ${cacheHits}. Tavily calls: ${tavilyCalls}${tavilyErrors > 0 ? ` (${tavilyErrors} errors)` : ""}. CoreSignal hits: ${coreSignalCalls}${coreSignalErrors > 0 ? ` (${coreSignalErrors} errors)` : ""}. LLM tokens in/out: ${tokensIn}/${tokensOut}.`);
 
   return {
     output: { notes, llmTokensIn: tokensIn, llmTokensOut: tokensOut, tavilyCalls, cacheHits },
     state: {
       log,
-      metrics: { observations: notes.length, tokensIn, tokensOut, tavilyCalls, tavilyErrors, cacheHits, tavilyAvailable: tavilyAvailable ? 1 : 0 },
+      metrics: { observations: notes.length, tokensIn, tokensOut, tavilyCalls, tavilyErrors, coreSignalCalls, coreSignalErrors, cacheHits, tavilyAvailable: tavilyAvailable ? 1 : 0, coreSignalAvailable: coreSignalAvailable ? 1 : 0 },
       inputCount: input.rows.length,
       outputCount: notes.length,
       llmTokensIn: tokensIn,

@@ -16,6 +16,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   }
   const stopAfter: PhaseKey | undefined = typeof body.stopAfter === "string" ? body.stopAfter as PhaseKey : undefined;
   const startFrom: PhaseKey | undefined = typeof body.startFrom === "string" ? body.startFrom as PhaseKey : undefined;
+  const testLimitRaw = Number(body.testLimit);
+  const testLimit = Number.isFinite(testLimitRaw) && testLimitRaw > 0 ? Math.min(Math.floor(testLimitRaw), 100) : undefined;
 
   const exists = await OutboundPilot.findById(id).lean<{ _id: unknown; pilotName?: string; phases?: Array<{ key: string; status: string }> }>();
   if (!exists) return NextResponse.json({ error: "pilot not found" }, { status: 404 });
@@ -35,7 +37,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
   }
 
-  runPipelineSafe(id, { stopAfter, startFrom }).catch(async (err) => {
+  runPipelineSafe(id, { stopAfter, startFrom, testLimit }).catch(async (err) => {
     await OutboundPilot.findByIdAndUpdate(id, {
       status: "failed",
       updatedAt: new Date(),

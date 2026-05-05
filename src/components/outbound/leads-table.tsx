@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, Mail, Check, AlertTriangle, ChevronRight, ChevronLeft, Copy, ExternalLink, Crown, Zap, X } from "lucide-react";
+import { Search, Mail, Check, AlertTriangle, ChevronRight, ChevronLeft, Copy, ExternalLink, Crown, Zap, X, Sparkles, Loader2, Upload, Layers } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
 import type { PilotLeadRow } from "./types";
 
-type LeadFilter = "all" | "decisionMakers" | "shippable" | "issues";
+type LeadFilter = "all" | "decisionMakers" | "shippable" | "issues" | "emailReady";
 
 const DECISION_MAKER_TITLE_RE = /\b(founder|co[- ]?founder|cofounder|ceo|chief executive)\b/i;
 
@@ -12,16 +13,32 @@ function isDecisionMaker(l: PilotLeadRow): boolean {
   return DECISION_MAKER_TITLE_RE.test(l.contactTitle || "");
 }
 
+function hasUsableEmail(l: PilotLeadRow): boolean {
+  return !!l.email && (l.emailStatus === "verified" || l.emailStatus === "likely_to_engage");
+}
+
 function isPending(l: PilotLeadRow): boolean {
   if (!l.claudePrompt) return false;
   return !(l.body1 && l.body2 && l.body3);
 }
 
-export default function LeadsTable({ leads, pilotId, onChanged }: { leads: PilotLeadRow[]; pilotId?: string; onChanged?: () => void }) {
+function isEmailReady(l: PilotLeadRow): boolean {
+  return hasUsableEmail(l) && isPending(l);
+}
+
+export default function LeadsTable({ leads, pilotId, onChanged, isTest }: { leads: PilotLeadRow[]; pilotId?: string; onChanged?: () => void; isTest?: boolean }) {
+  const { user } = useAuth();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<LeadFilter>("all");
   const [active, setActive] = useState<PilotLeadRow | null>(null);
   const [pasteMode, setPasteMode] = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+  const [autoMsg, setAutoMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [autoProgress, setAutoProgress] = useState<{ done: number; remaining: number; cost: number } | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const visible = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -29,6 +46,7 @@ export default function LeadsTable({ leads, pilotId, onChanged }: { leads: Pilot
       if (filter === "shippable" && !l.shippable) return false;
       if (filter === "issues" && (l.shippable || l.validationIssues.length === 0)) return false;
       if (filter === "decisionMakers" && !isDecisionMaker(l)) return false;
+      if (filter === "emailReady" && !isEmailReady(l)) return false;
       if (!s) return true;
       return (
         l.accountDomain.toLowerCase().includes(s) ||
@@ -42,6 +60,67 @@ export default function LeadsTable({ leads, pilotId, onChanged }: { leads: Pilot
 
   const decisionMakerCount = useMemo(() => leads.filter(isDecisionMaker).length, [leads]);
   const pendingCount = useMemo(() => leads.filter(isPending).length, [leads]);
+  const emailReadyCount = useMemo(() => leads.filter(isEmailReady).length, [leads]);
+  const shippableCount = useMemo(() => leads.filter((l) => l.shippable).length, [leads]);
+
+  async function handleImport(file: File) {
+    if (!pilotId || !user) return;
+    setImportBusy(true);
+    setImportMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("actorRole", user.role);
+      fd.append("isTest", isTest ? "true" : "false");
+      const res = await fetch(`/api/outbound/pilots/${pilotId}/leads/import`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) {
+        setImportMsg({ kind: "err", text: data.error || `Import failed (${res.status})` });
+      } else {
+        const promptInfo = data.promptsBuilt > 0 ? ` ${data.promptsBuilt} claude_prompt(s) regenerated from current row data + SKILL.md.` : "";
+        const skippedInfo = data.skipped > 0 ? ` ${data.skipped} rows skipped (missing domain or person identity).` : "";
+        setImportMsg({ kind: "ok", text: `Imported ${data.imported} leads into the ${data.bucket} bucket.${promptInfo}${skippedInfo} Rows with all 3 bodies are marked shippable.` });
+        if (onChanged) onChanged();
+      }
+    } catch (e) {
+      setImportMsg({ kind: "err", text: e instanceof Error ? e.message : "Network error" });
+    }
+    setImportBusy(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function autoGenerateBatch() {
+    if (!pilotId || !user) return;
+    setAutoBusy(true);
+    setAutoMsg(null);
+    let cumulativeDone = 0;
+    let cumulativeCost = 0;
+    try {
+      while (true) {
+        const res = await fetch(`/api/outbound/pilots/${pilotId}/leads/email/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ actorRole: user.role, actorEmail: user.email, limit: 100, concurrency: 5, isTest: !!isTest, onlyWithEmail: true }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setAutoMsg({ kind: "err", text: data.error || `Failed (${res.status})` });
+          break;
+        }
+        cumulativeDone += data.succeeded || 0;
+        cumulativeCost += data.usdCost || 0;
+        setAutoProgress({ done: cumulativeDone, remaining: data.remaining || 0, cost: cumulativeCost });
+        if (onChanged) onChanged();
+        if ((data.processed || 0) === 0 || (data.remaining || 0) === 0) {
+          setAutoMsg({ kind: "ok", text: `Generated ${cumulativeDone} email sequences (only leads with verified/likely emails). Total cost: ~$${cumulativeCost.toFixed(3)}.${data.failed > 0 ? ` ${data.failed} failed in last batch — see paste mode for the holdouts.` : ""} Refresh to see updated Shippable count.` });
+          break;
+        }
+      }
+    } catch (e) {
+      setAutoMsg({ kind: "err", text: e instanceof Error ? e.message : "Network error" });
+    }
+    setAutoBusy(false);
+  }
 
   if (pasteMode && pilotId) {
     return (
@@ -50,15 +129,52 @@ export default function LeadsTable({ leads, pilotId, onChanged }: { leads: Pilot
         pilotId={pilotId}
         onClose={() => setPasteMode(false)}
         onChanged={onChanged}
+        isTest={!!isTest}
+      />
+    );
+  }
+
+  if (bulkMode && pilotId) {
+    return (
+      <BulkMode
+        leads={visible.length > 0 ? visible : leads}
+        pilotId={pilotId}
+        onClose={() => setBulkMode(false)}
+        onChanged={onChanged}
+        isTest={!!isTest}
       />
     );
   }
 
   if (leads.length === 0) {
     return (
-      <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-10 text-center">
-        <p className="text-sm font-bold text-slate-700">No leads yet</p>
-        <p className="text-xs text-slate-500 mt-1">Run the stakeholder phase to populate leads.</p>
+      <div className="space-y-3">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+          className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImport(f); }}
+        />
+        <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-10 text-center space-y-3">
+          <p className="text-sm font-bold text-slate-700">No leads yet</p>
+          <p className="text-xs text-slate-500">Either run the stakeholder phase, or import a previously exported XLSX/CSV.</p>
+          {pilotId && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importBusy}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#6800FF] hover:bg-[#5800DD] disabled:opacity-50 text-white text-sm font-semibold rounded-lg"
+            >
+              {importBusy ? <><Loader2 size={13} className="animate-spin" /> Importing…</> : <><Upload size={13} /> Import .xlsx / .csv</>}
+            </button>
+          )}
+        </div>
+        {importMsg && (
+          <div className={`text-xs rounded-lg px-3 py-2 inline-flex items-start gap-1.5 ${importMsg.kind === "ok" ? "bg-emerald-50 border border-emerald-200 text-emerald-800" : "bg-red-50 border border-red-200 text-red-800"}`}>
+            {importMsg.kind === "ok" ? <Check size={13} className="mt-0.5 shrink-0" /> : <AlertTriangle size={13} className="mt-0.5 shrink-0" />}
+            <span>{importMsg.text}</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -83,18 +199,71 @@ export default function LeadsTable({ leads, pilotId, onChanged }: { leads: Pilot
           <Crown size={11} className="inline -mt-px mr-1" />
           Founders / CEOs ({decisionMakerCount})
         </FilterTab>
-        <FilterTab active={filter === "shippable"} onClick={() => setFilter("shippable")}>Shippable ({leads.filter((l) => l.shippable).length})</FilterTab>
+        <FilterTab active={filter === "emailReady"} onClick={() => setFilter("emailReady")}>Email-ready ({emailReadyCount})</FilterTab>
+        <FilterTab active={filter === "shippable"} onClick={() => setFilter("shippable")}>Shippable ({shippableCount})</FilterTab>
         <FilterTab active={filter === "issues"} onClick={() => setFilter("issues")}>Issues ({leads.filter((l) => !l.shippable && l.validationIssues.length > 0).length})</FilterTab>
-        {pilotId && pendingCount > 0 && (
-          <button
-            onClick={() => setPasteMode(true)}
-            className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#6800FF] text-white hover:bg-[#5800DD]"
-            title="Walk through pending leads, copy prompt → paste Claude JSON → auto-save"
-          >
-            <Zap size={13} /> Paste mode ({pendingCount} pending)
-          </button>
+        {pilotId && (
+          <div className="ml-auto flex items-center gap-1.5">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImport(f); }}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importBusy}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              title="Upload a previously exported XLSX or CSV to (re)populate leads. Existing claude_prompt cells are kept; missing ones are rebuilt from row data."
+            >
+              {importBusy ? <><Loader2 size={13} className="animate-spin" /> Importing…</> : <><Upload size={13} /> Import</>}
+            </button>
+            {emailReadyCount > 0 && (
+              <>
+                <button
+                  onClick={autoGenerateBatch}
+                  disabled={autoBusy}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-linear-to-br from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 text-white"
+                  title={`Auto-generate the 3-email sequence for ${emailReadyCount} email-ready leads via Claude Haiku. Leads without verified/likely emails are skipped.`}
+                >
+                  {autoBusy
+                    ? <><Loader2 size={13} className="animate-spin" /> Generating{autoProgress ? ` · ${autoProgress.done} done · ${autoProgress.remaining} left` : "…"}</>
+                    : <><Sparkles size={13} /> Auto-generate ({emailReadyCount})</>}
+                </button>
+                <button
+                  onClick={() => setBulkMode(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-sky-600 text-white hover:bg-sky-700"
+                  title="Bulk: copy a batch of prompts in one block, paste into ChatGPT, paste the JSON array response back"
+                >
+                  <Layers size={13} /> Bulk paste
+                </button>
+                <button
+                  onClick={() => setPasteMode(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-[#6800FF] text-white hover:bg-[#5800DD]"
+                  title="Manual fallback: walk through pending leads, copy prompt → paste Claude JSON → auto-save"
+                >
+                  <Zap size={13} /> Paste mode
+                </button>
+              </>
+            )}
+          </div>
         )}
       </div>
+
+      {importMsg && (
+        <div className={`text-xs rounded-lg px-3 py-2 inline-flex items-start gap-1.5 ${importMsg.kind === "ok" ? "bg-emerald-50 border border-emerald-200 text-emerald-800" : "bg-red-50 border border-red-200 text-red-800"}`}>
+          {importMsg.kind === "ok" ? <Check size={13} className="mt-0.5 shrink-0" /> : <AlertTriangle size={13} className="mt-0.5 shrink-0" />}
+          <span>{importMsg.text}</span>
+        </div>
+      )}
+
+      {autoMsg && (
+        <div className={`text-xs rounded-lg px-3 py-2 inline-flex items-start gap-1.5 ${autoMsg.kind === "ok" ? "bg-emerald-50 border border-emerald-200 text-emerald-800" : "bg-red-50 border border-red-200 text-red-800"}`}>
+          {autoMsg.kind === "ok" ? <Check size={13} className="mt-0.5 shrink-0" /> : <AlertTriangle size={13} className="mt-0.5 shrink-0" />}
+          <span>{autoMsg.text}</span>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <table className="w-full text-xs">
@@ -282,7 +451,7 @@ function ClaudePromptCard({ prompt }: { prompt: string }) {
   );
 }
 
-function PasteMode({ leads, pilotId, onClose, onChanged }: { leads: PilotLeadRow[]; pilotId: string; onClose: () => void; onChanged?: () => void }) {
+function PasteMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: PilotLeadRow[]; pilotId: string; onClose: () => void; onChanged?: () => void; isTest?: boolean }) {
   const queue = useMemo(() => leads.filter((l) => l.claudePrompt), [leads]);
   const [idx, setIdx] = useState(() => {
     const firstPending = queue.findIndex(isPending);
@@ -298,8 +467,6 @@ function PasteMode({ leads, pilotId, onClose, onChanged }: { leads: PilotLeadRow
   const lead = queue[idx];
 
   useEffect(() => {
-    setRaw("");
-    setErr("");
     setPromptCopied(false);
     if (lead?.claudePrompt) {
       navigator.clipboard.writeText(lead.claudePrompt).then(() => {
@@ -307,21 +474,35 @@ function PasteMode({ leads, pilotId, onClose, onChanged }: { leads: PilotLeadRow
       }).catch(() => {});
     }
     textareaRef.current?.focus();
-  }, [idx, lead?.accountDomain, lead?.personKey, lead?.claudePrompt]);
+  }, [idx, lead?.accountDomain, lead?.personKey]);
 
+  function navigateTo(newIdx: number) {
+    setIdx(newIdx);
+    setRaw("");
+    setErr("");
+  }
   function next() {
-    if (idx < queue.length - 1) setIdx(idx + 1);
+    if (idx < queue.length - 1) navigateTo(idx + 1);
   }
   function prev() {
-    if (idx > 0) setIdx(idx - 1);
+    if (idx > 0) navigateTo(idx - 1);
   }
   function jumpToNextPending() {
     for (let i = idx + 1; i < queue.length; i++) {
-      if (isPending(queue[i])) { setIdx(i); return; }
+      if (isPending(queue[i])) { navigateTo(i); return; }
     }
     for (let i = 0; i < idx; i++) {
-      if (isPending(queue[i])) { setIdx(i); return; }
+      if (isPending(queue[i])) { navigateTo(i); return; }
     }
+  }
+  function jumpToRank(rawRank: string): { ok: boolean; reason?: string } {
+    const n = Number(rawRank);
+    if (!Number.isFinite(n) || n < 1) return { ok: false, reason: "Enter a positive number" };
+    const byRank = queue.findIndex((l) => l.rank === n);
+    if (byRank >= 0) { navigateTo(byRank); return { ok: true }; }
+    const byPosition = Math.floor(n) - 1;
+    if (byPosition >= 0 && byPosition < queue.length) { navigateTo(byPosition); return { ok: true }; }
+    return { ok: false, reason: `Lead #${n} not in this queue (queue size: ${queue.length})` };
   }
 
   async function save() {
@@ -329,16 +510,24 @@ function PasteMode({ leads, pilotId, onClose, onChanged }: { leads: PilotLeadRow
     if (!raw.trim()) { setErr("Paste Claude's JSON response first."); return; }
     setBusy(true);
     setErr("");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
       const res = await fetch(`/api/outbound/pilots/${pilotId}/leads/email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountDomain: lead.accountDomain, personKey: lead.personKey, raw }),
+        body: JSON.stringify({ accountDomain: lead.accountDomain, personKey: lead.personKey, raw, isTest: !!isTest }),
+        signal: controller.signal,
       });
-      const data = await res.json();
+      let data: { error?: string; fields?: { subject1: string; body1: string; subject2: string; body2: string; subject3: string; body3: string }; shippable?: boolean } = {};
+      try { data = await res.json(); }
+      catch { data = { error: `Server returned ${res.status} with non-JSON body` }; }
       if (!res.ok) {
-        setErr(data.error || "Save failed");
-        setBusy(false);
+        setErr(data.error || `Save failed (${res.status})`);
+        return;
+      }
+      if (!data.fields) {
+        setErr("Server returned 200 but no fields — possible parsing issue. Try again.");
         return;
       }
       lead.subject1 = data.fields.subject1;
@@ -347,21 +536,29 @@ function PasteMode({ leads, pilotId, onClose, onChanged }: { leads: PilotLeadRow
       lead.body2 = data.fields.body2;
       lead.subject3 = data.fields.subject3;
       lead.body3 = data.fields.body3;
-      lead.shippable = true;
+      lead.shippable = !!data.shippable;
       setSavedAt(Date.now());
-      setRaw("");
-      jumpToNextPending();
       if (onChanged) onChanged();
+      await new Promise((r) => setTimeout(r, 350));
+      if (idx < queue.length - 1) {
+        navigateTo(idx + 1);
+      } else {
+        setRaw("");
+      }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Network error");
+      if (e instanceof DOMException && e.name === "AbortError") {
+        setErr("Save timed out after 30s. Check your network or server logs and try again.");
+      } else {
+        setErr(e instanceof Error ? e.message : "Network error");
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   function onKey(e: React.KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); save(); }
-    else if ((e.metaKey || e.ctrlKey) && e.key === "ArrowRight") { e.preventDefault(); next(); }
-    else if ((e.metaKey || e.ctrlKey) && e.key === "ArrowLeft") { e.preventDefault(); prev(); }
   }
 
   if (queue.length === 0) {
@@ -395,10 +592,11 @@ function PasteMode({ leads, pilotId, onClose, onChanged }: { leads: PilotLeadRow
           </button>
           <span className="text-[10px] font-bold uppercase tracking-wider text-[#6800FF] bg-[#f0e6ff] px-2 py-0.5 rounded">Paste mode</span>
           <span className="text-[11px] text-slate-500 tabular-nums">
-            Lead {idx + 1} / {queue.length} · {pendingRemaining} pending
+            Lead {idx + 1} / {queue.length} · #{lead?.rank ?? "—"} · {pendingRemaining} pending
           </span>
         </div>
         <div className="flex items-center gap-1.5">
+          <JumpToRank queueLength={queue.length} onJump={jumpToRank} />
           <button onClick={prev} disabled={idx === 0} className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-slate-200 bg-white hover:border-slate-300 disabled:opacity-40">
             <ChevronLeft size={12} /> Prev
           </button>
@@ -447,7 +645,7 @@ function PasteMode({ leads, pilotId, onClose, onChanged }: { leads: PilotLeadRow
             <p className="text-xs font-bold text-emerald-800 inline-flex items-center gap-1.5">
               <Zap size={12} /> Step 2 — Paste Claude's JSON here
             </p>
-            <span className="text-[10px] text-emerald-700/70">⌘↵ to save · ⌘→ next</span>
+            <span className="text-[10px] text-emerald-700/70">⌘↵ to save & advance · use Next / Prev buttons to navigate</span>
           </div>
           <textarea
             ref={textareaRef}
@@ -460,7 +658,7 @@ function PasteMode({ leads, pilotId, onClose, onChanged }: { leads: PilotLeadRow
           <div className="border-t border-emerald-200 bg-white px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
             <div className="text-[11px] min-h-[16px]">
               {err && <span className="text-red-700 font-medium">{err}</span>}
-              {!err && flashSaved && <span className="text-emerald-700 font-medium inline-flex items-center gap-1"><Check size={11} /> Saved · advanced</span>}
+              {!err && flashSaved && <span className="text-emerald-700 font-medium inline-flex items-center gap-1"><Check size={11} /> Saved → advancing…</span>}
               {!err && !flashSaved && lead.body1 && <span className="text-slate-500">Already drafted (saving will overwrite)</span>}
             </div>
             <button
@@ -484,6 +682,250 @@ function PasteMode({ leads, pilotId, onClose, onChanged }: { leads: PilotLeadRow
           </div>
         </details>
       )}
+    </div>
+  );
+}
+
+function BulkMode({ leads, pilotId, onClose, onChanged, isTest }: { leads: PilotLeadRow[]; pilotId: string; onClose: () => void; onChanged?: () => void; isTest?: boolean }) {
+  const queue = useMemo(() => leads.filter((l) => l.claudePrompt && isPending(l) && hasUsableEmail(l)), [leads]);
+  const [batchSize, setBatchSize] = useState(20);
+  const [batchStart, setBatchStart] = useState(0);
+  const [response, setResponse] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [exportCopied, setExportCopied] = useState(false);
+
+  const batch = useMemo(() => queue.slice(batchStart, batchStart + batchSize), [queue, batchStart, batchSize]);
+
+  const exportText = useMemo(() => {
+    if (batch.length === 0) return "";
+    const lines: string[] = [];
+    lines.push(`INSTRUCTIONS: For each lead block below, generate a 3-email sequence following the SKILL rules in your project instructions.`);
+    lines.push(`Return ONE valid JSON array (no markdown fences, no preamble). Each item must have these exact keys:`);
+    lines.push(`  email, firstName, lastName, personKey (echo input as-is), subject_1, body_1, subject_2, body_2, subject_3, body_3`);
+    lines.push(``);
+    lines.push(`Output schema:`);
+    lines.push(`[`);
+    lines.push(`  { "email": "...", "firstName": "...", "lastName": "...", "personKey": "...", "subject_1": "...", "body_1": "...", "subject_2": "...", "body_2": "...", "subject_3": "...", "body_3": "..." },`);
+    lines.push(`  ...`);
+    lines.push(`]`);
+    lines.push(``);
+    lines.push(`Output ${batch.length} items, one per lead, in the same order as the prompts below.`);
+    lines.push(``);
+    for (let i = 0; i < batch.length; i++) {
+      const l = batch[i];
+      lines.push(`========== LEAD ${i + 1} of ${batch.length} ==========`);
+      lines.push(`email: ${l.email}`);
+      lines.push(`firstName: ${l.fullName.split(" ")[0] || ""}`);
+      lines.push(`lastName: ${l.fullName.split(" ").slice(1).join(" ") || ""}`);
+      lines.push(`personKey: ${l.personKey}`);
+      lines.push(``);
+      lines.push(l.claudePrompt || "");
+      lines.push(``);
+    }
+    return lines.join("\n");
+  }, [batch]);
+
+  function copyExport() {
+    navigator.clipboard.writeText(exportText).then(() => {
+      setExportCopied(true);
+      setTimeout(() => setExportCopied(false), 1800);
+    }).catch(() => {});
+  }
+
+  function stripFences(s: string): string {
+    let t = s.trim();
+    t = t.replace(/^```(?:json)?\s*/i, "");
+    t = t.replace(/```\s*$/i, "");
+    return t.trim();
+  }
+
+  function extractFirstArray(s: string): string {
+    const start = s.indexOf("[");
+    const end = s.lastIndexOf("]");
+    if (start >= 0 && end > start) return s.slice(start, end + 1);
+    return s;
+  }
+
+  async function saveBulk() {
+    if (!response.trim()) { setMsg({ kind: "err", text: "Paste ChatGPT's JSON array response first." }); return; }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const cleaned = extractFirstArray(stripFences(response));
+      let parsed: unknown;
+      try { parsed = JSON.parse(cleaned); }
+      catch (e) {
+        setMsg({ kind: "err", text: `Could not parse JSON: ${e instanceof Error ? e.message : "unknown"}` });
+        setBusy(false);
+        return;
+      }
+      if (!Array.isArray(parsed)) {
+        setMsg({ kind: "err", text: "Expected a JSON array (got an object). Wrap items in [ ... ]." });
+        setBusy(false);
+        return;
+      }
+      const res = await fetch(`/api/outbound/pilots/${pilotId}/leads/email/bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actorRole: "admin", isTest: !!isTest, results: parsed }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMsg({ kind: "err", text: data.error || `Bulk save failed (${res.status})` });
+        setBusy(false);
+        return;
+      }
+      const matchedBy = data.matchedBy || {};
+      setMsg({
+        kind: "ok",
+        text: `Saved ${data.matched}/${data.totalReceived} leads. Matched by personKey ${matchedBy.personKey || 0}, email ${matchedBy.email || 0}, name+domain ${matchedBy.nameDomain || 0}. Unmatched: ${data.unmatched}. Incomplete: ${data.incomplete}.`,
+      });
+      setResponse("");
+      if (onChanged) onChanged();
+      const nextStart = batchStart + batchSize;
+      if (nextStart < queue.length) setBatchStart(nextStart);
+    } catch (e) {
+      setMsg({ kind: "err", text: e instanceof Error ? e.message : "Network error" });
+    }
+    setBusy(false);
+  }
+
+  if (queue.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center space-y-3">
+        <Layers size={20} className="mx-auto text-slate-300" />
+        <p className="text-sm font-bold text-slate-700">No leads need bulk drafting</p>
+        <p className="text-xs text-slate-500">Bulk mode shows leads with prompts + verified emails but no body sequence yet.</p>
+        <button onClick={onClose} className="text-xs font-medium text-[#6800FF] hover:underline">Back</button>
+      </div>
+    );
+  }
+
+  const remaining = queue.length - batchStart;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={onClose} className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-800">
+            <X size={13} /> Close
+          </button>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-sky-700 bg-sky-50 px-2 py-0.5 rounded">Bulk paste</span>
+          <span className="text-[11px] text-slate-500 tabular-nums">
+            Batch {batch.length > 0 ? `${batchStart + 1}–${batchStart + batch.length}` : "—"} of {queue.length} pending · {remaining} remaining
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="inline-flex items-center gap-1 text-[11px] text-slate-600">
+            Batch size
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={batchSize}
+              onChange={(e) => setBatchSize(Math.max(1, Math.min(50, Number(e.target.value) || 20)))}
+              className="w-14 px-1.5 py-1 border border-slate-200 rounded text-xs tabular-nums focus:outline-none focus:border-sky-500"
+            />
+          </label>
+          <button
+            onClick={() => setBatchStart(Math.max(0, batchStart - batchSize))}
+            disabled={batchStart === 0 || busy}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-slate-200 bg-white hover:border-slate-300 disabled:opacity-40"
+          >
+            <ChevronLeft size={12} /> Prev batch
+          </button>
+          <button
+            onClick={() => setBatchStart(Math.min(queue.length - 1, batchStart + batchSize))}
+            disabled={batchStart + batchSize >= queue.length || busy}
+            className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-slate-200 bg-white hover:border-slate-300 disabled:opacity-40"
+          >
+            Next batch <ChevronRight size={12} />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className="bg-white rounded-2xl border border-sky-300 ring-1 ring-sky-100 overflow-hidden">
+          <div className="bg-sky-50 border-b border-sky-200 px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
+            <p className="text-xs font-bold text-sky-800 inline-flex items-center gap-1.5">
+              <Mail size={12} /> Step 1 — Copy and paste this batch into ChatGPT
+            </p>
+            <div className="flex items-center gap-1.5">
+              <button onClick={copyExport} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold ${exportCopied ? "bg-emerald-600 text-white" : "bg-sky-600 text-white hover:bg-sky-700"}`}>
+                {exportCopied ? <><Check size={11} /> Copied</> : <><Copy size={11} /> Copy {batch.length} prompts</>}
+              </button>
+              <a href="https://chat.openai.com" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 text-[11px] font-semibold">
+                <ExternalLink size={11} /> ChatGPT
+              </a>
+            </div>
+          </div>
+          <pre className="p-3 max-h-[420px] overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-slate-700 bg-slate-50">{exportText.slice(0, 4000)}{exportText.length > 4000 ? `\n\n…(${exportText.length.toLocaleString()} chars total — full text is in your clipboard after Copy)` : ""}</pre>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-emerald-300 ring-1 ring-emerald-100 overflow-hidden">
+          <div className="bg-emerald-50 border-b border-emerald-200 px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
+            <p className="text-xs font-bold text-emerald-800 inline-flex items-center gap-1.5">
+              <Zap size={12} /> Step 2 — Paste ChatGPT's JSON array here
+            </p>
+            <span className="text-[10px] text-emerald-700/70">expects [...] with {batch.length} items</span>
+          </div>
+          <textarea
+            value={response}
+            onChange={(e) => setResponse(e.target.value)}
+            placeholder='[{"email":"...","firstName":"...","lastName":"...","personKey":"...","subject_1":"...","body_1":"...","subject_2":"...","body_2":"...","subject_3":"...","body_3":"..."}, ...]'
+            className="w-full p-3 h-[260px] font-mono text-[11px] leading-relaxed text-slate-800 bg-white focus:outline-none resize-none"
+          />
+          <div className="border-t border-emerald-200 bg-white px-3 py-2 flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-[11px] min-h-[16px]">
+              {msg && (
+                <span className={msg.kind === "ok" ? "text-emerald-700 font-medium inline-flex items-center gap-1" : "text-red-700 font-medium inline-flex items-center gap-1"}>
+                  {msg.kind === "ok" ? <Check size={11} /> : <AlertTriangle size={11} />}
+                  {msg.text}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={saveBulk}
+              disabled={busy || !response.trim()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40"
+            >
+              {busy ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : <>Parse &amp; save {batch.length} leads <ChevronRight size={12} /></>}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JumpToRank({ queueLength, onJump }: { queueLength: number; onJump: (raw: string) => { ok: boolean; reason?: string } }) {
+  const [val, setVal] = useState("");
+  const [err, setErr] = useState("");
+  function go() {
+    if (!val.trim()) return;
+    const r = onJump(val.trim());
+    if (!r.ok) { setErr(r.reason || "not found"); return; }
+    setErr("");
+    setVal("");
+  }
+  return (
+    <div className="inline-flex items-center gap-1">
+      <span className="text-[10px] text-slate-400">Jump #</span>
+      <input
+        type="number"
+        min={1}
+        max={queueLength}
+        value={val}
+        onChange={(e) => { setVal(e.target.value); setErr(""); }}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } }}
+        placeholder="715"
+        className="w-16 px-1.5 py-1 border border-slate-200 rounded text-xs tabular-nums focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/15"
+      />
+      <button onClick={go} disabled={!val.trim()} className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-[#6800FF] hover:bg-[#5800DD] disabled:opacity-40 text-white font-semibold">
+        Go
+      </button>
+      {err && <span className="text-[10px] text-red-700 ml-1">{err}</span>}
     </div>
   );
 }

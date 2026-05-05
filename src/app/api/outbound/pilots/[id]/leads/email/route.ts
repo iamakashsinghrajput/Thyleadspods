@@ -68,16 +68,25 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const accountDomain = String(body.accountDomain || "").toLowerCase().trim();
   const personKey = String(body.personKey || "").trim();
   const raw = String(body.raw || "");
+  const isTest = !!body.isTest;
+  const dataPilotId = isTest ? `${id}__test` : id;
   if (!accountDomain || !personKey) return NextResponse.json({ error: "accountDomain and personKey required" }, { status: 400 });
 
   const parsed = parseSequence(raw);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
+  const existing = await OutboundLead.findOne({ pilotId: dataPilotId, accountDomain, personKey })
+    .select({ email: 1, emailStatus: 1 })
+    .lean<{ email?: string; emailStatus?: string }>();
+  if (!existing) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+  const status = String(existing.emailStatus || "").toLowerCase();
+  const hasUsableEmail = !!existing.email && (status === "verified" || status === "likely_to_engage");
+
   const result = await OutboundLead.updateOne(
-    { pilotId: id, accountDomain, personKey },
-    { $set: { ...parsed.fields, shippable: true, validationIssues: [], updatedAt: new Date() } },
+    { pilotId: dataPilotId, accountDomain, personKey },
+    { $set: { ...parsed.fields, shippable: hasUsableEmail, validationIssues: hasUsableEmail ? [] : ["no_verified_email"], updatedAt: new Date() } },
   );
   if (result.matchedCount === 0) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
 
-  return NextResponse.json({ ok: true, fields: parsed.fields });
+  return NextResponse.json({ ok: true, fields: parsed.fields, shippable: hasUsableEmail });
 }

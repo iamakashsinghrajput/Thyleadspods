@@ -29,15 +29,17 @@ function str(v: unknown): string { return typeof v === "string" ? v : ""; }
 function num(v: unknown): number { return typeof v === "number" ? v : Number(v) || 0; }
 function arr(v: unknown): string[] { return Array.isArray(v) ? v.map(String) : []; }
 
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   await connectDB();
   const { id } = await ctx.params;
+  const isTest = req.nextUrl.searchParams.get("test") === "1";
+  const dataPilotId = isTest ? `${id}__test` : id;
   const doc = await OutboundPilot.findById(id).lean<PilotShape>();
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const [leadDocs, accountDocs] = await Promise.all([
-    OutboundLead.find({ pilotId: id }).sort({ rank: 1 }).lean(),
-    OutboundAccount.find({ pilotId: id }).select({ domain: 1, linkedinUrl: 1 }).lean(),
+    OutboundLead.find({ pilotId: dataPilotId }).sort({ rank: 1 }).lean(),
+    OutboundAccount.find({ pilotId: dataPilotId }).select({ domain: 1, linkedinUrl: 1 }).lean(),
   ]);
 
   if (leadDocs.length === 0) {

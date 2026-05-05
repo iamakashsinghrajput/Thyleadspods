@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
@@ -33,6 +33,23 @@ export default function Sidebar() {
   const [editMembers, setEditMembers] = useState("");
   const isAdmin = user?.role === "admin" || user?.role === "superadmin";
   const isSuperadmin = user?.role === "superadmin";
+  const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    if (!isSuperadmin || !user?.email) { setPendingCount(0); return; }
+    let cancelled = false;
+    async function refresh() {
+      try {
+        const res = await fetch(`/api/auth/approvals?requester=${encodeURIComponent(user!.email)}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setPendingCount((data.pending || []).length);
+      } catch {}
+    }
+    refresh();
+    const t = setInterval(refresh, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [isSuperadmin, user?.email]);
   const { collapsed, toggle } = useSidebar();
   const [podsOpen, setPodsOpen] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -72,8 +89,13 @@ export default function Sidebar() {
             const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href);
             const Icon = item.icon;
             return (
-              <Link key={item.href} href={item.href} className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isActive ? "bg-[#f0e6ff] text-[#6800FF]" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"}`} title={item.label}>
+              <Link key={item.href} href={item.href} className={`relative w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isActive ? "bg-[#f0e6ff] text-[#6800FF]" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"}`} title={item.label === "Members" && pendingCount > 0 ? `Members · ${pendingCount} pending approval${pendingCount === 1 ? "" : "s"}` : item.label}>
                 <Icon size={20} />
+                {item.href === "/members" && pendingCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 text-[9px] font-bold bg-amber-500 text-white rounded-full">
+                    {pendingCount}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -122,6 +144,11 @@ export default function Sidebar() {
                 {isActive && <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-[#6800FF] rounded-r-full" />}
                 <Icon size={18} />
                 <span className="text-sm flex-1">{item.label}</span>
+                {item.href === "/members" && pendingCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold bg-amber-500 text-white rounded-full">
+                    {pendingCount}
+                  </span>
+                )}
               </Link>
             );
           })}

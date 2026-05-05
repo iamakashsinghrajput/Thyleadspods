@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, Trash2, UserMinus, Shield, AlertTriangle, Check, X, RefreshCcw } from "lucide-react";
+import { Search, Trash2, UserMinus, Shield, AlertTriangle, Check, X, RefreshCcw, UserPlus, Clock } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { usePods } from "@/lib/pod-context";
 
@@ -16,10 +16,18 @@ interface MemberRow {
   createdAt: string;
 }
 
+interface PendingRow {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: string;
+}
+
 export default function MembersPage() {
   const { user, hydrated } = useAuth();
   const { pods, podMap, updatePodMembers } = usePods();
   const [members, setMembers] = useState<MemberRow[]>([]);
+  const [pending, setPending] = useState<PendingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
@@ -33,13 +41,20 @@ export default function MembersPage() {
     setLoading(true);
     setErr("");
     try {
-      const res = await fetch(`/api/users?actor=${encodeURIComponent(user.email)}`);
-      const data = await res.json();
-      if (!res.ok) {
-        setErr(data.error || "Failed to load members");
+      const [usersRes, approvalsRes] = await Promise.all([
+        fetch(`/api/users?actor=${encodeURIComponent(user.email)}`),
+        fetch(`/api/auth/approvals?requester=${encodeURIComponent(user.email)}`),
+      ]);
+      const usersData = await usersRes.json();
+      const approvalsData = await approvalsRes.json();
+      if (!usersRes.ok) {
+        setErr(usersData.error || "Failed to load members");
         setMembers([]);
       } else {
-        setMembers(data.users || []);
+        setMembers(usersData.users || []);
+      }
+      if (approvalsRes.ok) {
+        setPending(approvalsData.pending || []);
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Network error");
@@ -48,6 +63,30 @@ export default function MembersPage() {
   }
 
   useEffect(() => { if (hydrated && isSuperadmin) fetchMembers(); }, [hydrated, isSuperadmin, user?.email]);
+
+  async function decidePending(p: PendingRow, action: "approve" | "reject") {
+    if (!user?.email) return;
+    setBusyId(p.id);
+    setErr("");
+    try {
+      const res = await fetch(`/api/auth/approvals`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requester: user.email, email: p.email, action }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErr(data.error || `Failed to ${action}`);
+        setBusyId("");
+        return;
+      }
+      setPending((prev) => prev.filter((x) => x.id !== p.id));
+      fetchMembers();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Network error");
+    }
+    setBusyId("");
+  }
 
   const visible = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -148,6 +187,63 @@ export default function MembersPage() {
           <AlertTriangle size={13} /> {err}
         </div>
       )}
+
+      <div className={`rounded-2xl border overflow-hidden ${pending.length > 0 ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white"}`}>
+        <div className={`px-4 py-2.5 flex items-center justify-between gap-2 ${pending.length > 0 ? "bg-amber-100/50 border-b border-amber-200" : "bg-slate-50 border-b border-slate-200"}`}>
+          <div className="inline-flex items-center gap-2">
+            <UserPlus size={14} className={pending.length > 0 ? "text-amber-700" : "text-slate-400"} />
+            <p className={`text-sm font-bold ${pending.length > 0 ? "text-amber-900" : "text-slate-700"}`}>
+              Pending login requests
+              <span className={`ml-2 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${pending.length > 0 ? "bg-amber-600 text-white" : "bg-slate-200 text-slate-600"}`}>{pending.length}</span>
+            </p>
+          </div>
+          {pending.length > 0 && <span className="text-[11px] text-amber-800">Approve verified Thyleads employees · reject anyone you don&apos;t recognize</span>}
+        </div>
+        {pending.length === 0 ? (
+          <p className="px-4 py-6 text-xs text-slate-500 text-center">No pending requests. New signups will appear here for you to approve.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-amber-50 text-[10px] font-bold text-amber-700 uppercase tracking-wider">
+              <tr>
+                <th className="text-left px-4 py-2">Name</th>
+                <th className="text-left px-4 py-2">Email</th>
+                <th className="text-left px-4 py-2">Requested at</th>
+                <th className="text-right px-4 py-2">Decision</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-amber-200/60">
+              {pending.map((p) => (
+                <tr key={p.id} className="hover:bg-amber-100/30">
+                  <td className="px-4 py-2.5 font-medium text-slate-900">{p.name}</td>
+                  <td className="px-4 py-2.5 text-slate-700 font-mono text-xs">{p.email}</td>
+                  <td className="px-4 py-2.5 text-slate-600 text-xs inline-flex items-center gap-1">
+                    <Clock size={11} className="text-slate-400" />
+                    {new Date(p.createdAt).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <div className="inline-flex items-center gap-1.5">
+                      <button
+                        onClick={() => decidePending(p, "approve")}
+                        disabled={busyId === p.id}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[11px] font-semibold rounded"
+                      >
+                        <Check size={11} /> Approve
+                      </button>
+                      <button
+                        onClick={() => decidePending(p, "reject")}
+                        disabled={busyId === p.id}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-red-300 hover:bg-red-50 disabled:opacity-50 text-red-700 text-[11px] font-semibold rounded"
+                      >
+                        <X size={11} /> Reject
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <table className="w-full text-sm">

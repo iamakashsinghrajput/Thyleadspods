@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Save, BookOpen, FileText, Eye, Pencil } from "lucide-react";
+import { Loader2, Save, BookOpen, FileText, Eye, Pencil, Sparkles, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 interface SkillFormProps {
@@ -29,6 +29,10 @@ export default function SkillForm({ pilotId, clientName, pipelineRunning, canEdi
   const [err, setErr] = useState<string | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   const [tab, setTab] = useState<"edit" | "preview">("edit");
+  const [genBusy, setGenBusy] = useState(false);
+  const [genErr, setGenErr] = useState<string | null>(null);
+  const [genInfo, setGenInfo] = useState<{ chars: number; lines: number; inputTokens: number; outputTokens: number; model: string; isLive: boolean; usdCost: number } | null>(null);
+  const [confirmRegen, setConfirmRegen] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -70,6 +74,44 @@ export default function SkillForm({ pilotId, clientName, pipelineRunning, canEdi
       setSavedTick((n) => n + 1);
       setLoaded((prev) => prev ? { ...prev, skillContent, skillVersion, chars: d.chars, lines: d.lines, skillUpdatedAt: new Date().toISOString(), skillUpdatedBy: user.email } : null);
     } finally { setBusy(false); }
+  }
+
+  async function generate() {
+    if (!user) return;
+    setGenBusy(true); setGenErr(null); setGenInfo(null); setConfirmRegen(false);
+    try {
+      const res = await fetch(`/api/outbound/pilots/${pilotId}/skill/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actorRole: user.role, actorEmail: user.email }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setGenErr(d.error || `Generation failed (${res.status})`);
+        return;
+      }
+      setSkillContent(d.skillContent || "");
+      setSkillVersion(d.skillVersion || "v9-ai");
+      setGenInfo({
+        chars: d.chars, lines: d.lines,
+        inputTokens: d.inputTokens, outputTokens: d.outputTokens,
+        model: d.model, isLive: d.isLive, usdCost: d.usdCost,
+      });
+      setLoaded((prev) => prev ? {
+        ...prev,
+        skillContent: d.skillContent,
+        skillVersion: d.skillVersion,
+        chars: d.chars,
+        lines: d.lines,
+        skillUpdatedAt: new Date().toISOString(),
+        skillUpdatedBy: user.email,
+      } : null);
+      setSavedTick((n) => n + 1);
+    } catch (e) {
+      setGenErr(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setGenBusy(false);
+    }
   }
 
   const chars = skillContent.length;
@@ -155,18 +197,75 @@ export default function SkillForm({ pilotId, clientName, pipelineRunning, canEdi
       {savedTick > 0 && !err && <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1.5">Saved. Phase 9 will use this on the next run.</p>}
 
       {canEdit && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={save} disabled={busy || !dirty} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#6800FF] hover:bg-[#5800DD] disabled:bg-slate-300 text-white text-sm font-semibold rounded-lg transition-colors">
-            {busy ? <><Loader2 size={13} className="animate-spin" /> Saving…</> : <><Save size={13} /> Save SKILL for {clientName}</>}
-          </button>
-          {dirty && loaded && (
-            <button
-              onClick={() => { setSkillContent(loaded.skillContent || ""); setSkillVersion(loaded.skillVersion || "v8"); }}
-              disabled={busy}
-              className="px-3 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-medium rounded-lg transition-colors"
-            >
-              Discard changes
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={save} disabled={busy || !dirty} className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#6800FF] hover:bg-[#5800DD] disabled:bg-slate-300 text-white text-sm font-semibold rounded-lg transition-colors">
+              {busy ? <><Loader2 size={13} className="animate-spin" /> Saving…</> : <><Save size={13} /> Save SKILL for {clientName}</>}
             </button>
+            {dirty && loaded && (
+              <button
+                onClick={() => { setSkillContent(loaded.skillContent || ""); setSkillVersion(loaded.skillVersion || "v8"); }}
+                disabled={busy}
+                className="px-3 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-medium rounded-lg transition-colors"
+              >
+                Discard changes
+              </button>
+            )}
+
+            <span className="ml-auto" />
+
+            {!skillContent.trim() ? (
+              <button
+                onClick={generate}
+                disabled={genBusy || pipelineRunning}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-linear-to-br from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
+                title="Use Claude (Sonnet 4.6) to generate a SKILL.md from this pilot's Client Brief"
+              >
+                {genBusy ? <><Loader2 size={13} className="animate-spin" /> Generating…</> : <><Sparkles size={13} /> Generate SKILL with Claude</>}
+              </button>
+            ) : confirmRegen ? (
+              <div className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-300 rounded-lg px-2 py-1.5">
+                <span className="text-[11px] font-semibold text-amber-800">Overwrite current SKILL?</span>
+                <button
+                  onClick={generate}
+                  disabled={genBusy}
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-semibold rounded disabled:opacity-50"
+                >
+                  {genBusy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} Yes, regenerate
+                </button>
+                <button
+                  onClick={() => setConfirmRegen(false)}
+                  disabled={genBusy}
+                  className="px-2 py-1 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-[11px] font-semibold rounded"
+                >Cancel</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmRegen(true)}
+                disabled={genBusy || pipelineRunning}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-white border border-amber-300 hover:bg-amber-50 text-amber-700 text-xs font-semibold rounded-lg transition-colors"
+                title="Regenerate the SKILL from the Client Brief — overwrites current content"
+              >
+                <Sparkles size={12} /> Regenerate with Claude
+              </button>
+            )}
+          </div>
+
+          {genErr && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700 inline-flex items-start gap-1.5 max-w-2xl">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {genErr}
+            </div>
+          )}
+          {genInfo && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-800 max-w-2xl">
+              <p className="font-semibold inline-flex items-center gap-1.5"><Sparkles size={12} /> Generated with {genInfo.model}{!genInfo.isLive && " (mock — set ANTHROPIC_API_KEY for live)"}.</p>
+              <p className="mt-0.5 text-[11px] text-emerald-700/90 tabular-nums">
+                {genInfo.chars.toLocaleString()} chars · {genInfo.lines.toLocaleString()} lines ·
+                {" "}{genInfo.inputTokens.toLocaleString()} in / {genInfo.outputTokens.toLocaleString()} out tokens ·
+                {" "}~${genInfo.usdCost.toFixed(3)} this run.
+                Saved automatically — review and tweak below if needed.
+              </p>
+            </div>
           )}
         </div>
       )}

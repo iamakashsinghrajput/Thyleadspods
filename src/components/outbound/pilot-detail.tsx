@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Play, Loader2, Download, Upload, FileText, Users, Sliders, BookOpen, Briefcase, Square } from "lucide-react";
+import { ArrowLeft, Play, Loader2, Download, Upload, FileText, Users, Sliders, BookOpen, Briefcase, Square, FlaskConical } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import PhaseCard from "./phase-card";
 import LeadsTable from "./leads-table";
@@ -27,7 +27,7 @@ const PHASE_TITLES: Record<string, { title: string; agent: string; description: 
   export:      { number: 11, title: "Smartlead CSV",          agent: "export-agent",      description: "The final Smartlead-ready CSV." },
 };
 
-type Tab = "pipeline" | "inputs" | "brief" | "config" | "skill" | "accounts" | "leads";
+type Tab = "pipeline" | "inputs" | "brief" | "config" | "skill" | "accounts" | "leads" | "testLeads";
 
 export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId: string; onBack: () => void; canEdit: boolean }) {
   const { user } = useAuth();
@@ -88,7 +88,7 @@ export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId:
     } finally { setBusy(false); }
   }
 
-  async function startRun(opts: { stopAfter?: string; startFrom?: string } = {}) {
+  async function startRun(opts: { stopAfter?: string; startFrom?: string; testLimit?: number } = {}) {
     if (!user) return;
     setBusy(true); setErr(null);
     try {
@@ -99,6 +99,7 @@ export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId:
           actorRole: user.role,
           ...(opts.stopAfter ? { stopAfter: opts.stopAfter } : {}),
           ...(opts.startFrom ? { startFrom: opts.startFrom } : {}),
+          ...(opts.testLimit ? { testLimit: opts.testLimit } : {}),
         }),
       });
       if (!res.ok) {
@@ -147,13 +148,22 @@ export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId:
                     <Square size={13} className="fill-white" /> Stop
                   </button>
                 ) : (
-                  <button
-                    onClick={() => startRun()} disabled={busy || inputsReady === 0}
-                    title={inputsReady === 0 ? "Upload your target list first." : ""}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#6800FF] hover:bg-[#5800DD] disabled:bg-slate-300 text-white text-sm font-semibold rounded-lg transition-colors"
-                  >
-                    <Play size={13} /> Run full pipeline
-                  </button>
+                  <>
+                    <button
+                      onClick={() => startRun({ testLimit: 10 })} disabled={busy || inputsReady === 0}
+                      title={inputsReady === 0 ? "Upload your target list first." : "Run all phases but cap to 10 leads — fast iteration on SKILL.md"}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      <Play size={12} /> Test run (10)
+                    </button>
+                    <button
+                      onClick={() => startRun()} disabled={busy || inputsReady === 0}
+                      title={inputsReady === 0 ? "Upload your target list first." : ""}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#6800FF] hover:bg-[#5800DD] disabled:bg-slate-300 text-white text-sm font-semibold rounded-lg transition-colors"
+                    >
+                      <Play size={13} /> Run full pipeline
+                    </button>
+                  </>
                 )}
               </>
             )}
@@ -192,6 +202,10 @@ export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId:
           <TabButton active={tab === "skill"} onClick={() => setTab("skill")} icon={<BookOpen size={13} />}>SKILL.md</TabButton>
           <TabButton active={tab === "accounts"} onClick={() => setTab("accounts")} icon={<FileText size={13} />}>Accounts <span className="ml-1 text-[10px] text-slate-400">({data.accounts.length})</span></TabButton>
           <TabButton active={tab === "leads"} onClick={() => setTab("leads")} icon={<Users size={13} />}>Leads <span className="ml-1 text-[10px] text-slate-400">({data.leads.length})</span></TabButton>
+          <TabButton active={tab === "testLeads"} onClick={() => setTab("testLeads")} icon={<FlaskConical size={13} />}>
+            <span className="text-amber-700">Test leads</span>
+            <span className="ml-1 text-[10px] text-slate-400">({data.testLeads?.length || 0})</span>
+          </TabButton>
         </div>
 
         {tab === "pipeline" && (
@@ -260,7 +274,64 @@ export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId:
         )}
 
         {tab === "leads" && (
-          <LeadsTable leads={data.leads} pilotId={pilotId} onChanged={fetchOnce} />
+          <div className="space-y-3">
+            {canEdit && data.accounts.length > 0 && data.leads.length < data.accounts.length && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2.5 text-xs text-blue-900 space-y-2">
+                <div className="inline-flex items-start gap-1.5">
+                  <Users size={13} className="mt-0.5 shrink-0" />
+                  <span>
+                    <strong>{data.leads.length} leads, but {data.accounts.length} accounts are scored.</strong> A previous &ldquo;Test run&rdquo; (before isolation was added) wiped most of this list. You can rebuild from the existing accounts — Apollo enrich/email credits are NOT consumed by the default restore (stakeholder phase uses free Apollo people-search).
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap pl-5">
+                  <button
+                    onClick={() => {
+                      if (!confirm(`Restore ${data.accounts.length} accounts' lead names from Apollo people-search?\n\nThis is FREE (no Apollo credits). You'll get firstName, lastName, title, LinkedIn URL — but NOT verified emails. To get emails later, click "Resume from email_match" on the Pipeline tab for the leads you want to contact.\n\nProceed?`)) return;
+                      startRun({ startFrom: "stakeholder", stopAfter: "stakeholder" });
+                    }}
+                    disabled={busy || running}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-md"
+                  >
+                    <Play size={12} /> Restore lead names (free)
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!confirm(`Restore ${data.accounts.length} accounts' leads + verified emails + research + prompts?\n\nThis WILL CONSUME Apollo credits (email match charges ~1 credit per lead). For ${data.accounts.length} accounts × 5 leads each = up to ${data.accounts.length * 5} credits.\n\nIf you want to limit cost, click "Restore lead names" instead and email-match only the subset you want.\n\nProceed with full restore?`)) return;
+                      startRun({ startFrom: "stakeholder" });
+                    }}
+                    disabled={busy || running}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-amber-400 text-amber-800 hover:bg-amber-50 disabled:opacity-50 text-xs font-semibold rounded-md"
+                  >
+                    <Play size={12} /> Full restore (uses credits)
+                  </button>
+                </div>
+              </div>
+            )}
+            <LeadsTable leads={data.leads} pilotId={pilotId} onChanged={fetchOnce} />
+          </div>
+        )}
+
+        {tab === "testLeads" && (
+          <div className="space-y-3">
+            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800 inline-flex items-start gap-1.5">
+              <FlaskConical size={13} className="mt-0.5 shrink-0" />
+              <span>
+                <strong>Test leads</strong> from "Test run (10)" iterations. Fully isolated from the production Leads tab — auto-generate, paste mode, and XLSX download all stay scoped here.
+                {(data.testLeads?.length || 0) > 0 && (
+                  <a href={`/api/outbound/pilots/${pilotId}/xlsx?test=1`} className="ml-2 underline font-semibold hover:text-amber-900">Download test .xlsx</a>
+                )}
+              </span>
+            </div>
+            {(data.testLeads?.length || 0) === 0 ? (
+              <div className="bg-white rounded-2xl border border-dashed border-slate-300 p-10 text-center">
+                <FlaskConical size={20} className="mx-auto text-slate-300 mb-2" />
+                <p className="text-sm font-bold text-slate-700">No test leads yet</p>
+                <p className="text-xs text-slate-500 mt-1">Click <strong>&ldquo;Test run (10)&rdquo;</strong> at the top to generate 10 leads here without touching the production Leads tab.</p>
+              </div>
+            ) : (
+              <LeadsTable leads={data.testLeads || []} pilotId={pilotId} onChanged={fetchOnce} isTest />
+            )}
+          </div>
         )}
       </div>
     </div>

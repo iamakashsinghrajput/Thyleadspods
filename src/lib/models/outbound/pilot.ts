@@ -114,6 +114,7 @@ const OutboundPilotSchema = new Schema({
 }, { strict: false });
 
 OutboundPilotSchema.index({ clientName: 1, createdAt: -1 });
+OutboundPilotSchema.index({ updatedAt: -1 });
 
 if (mongoose.models[modelName]) delete mongoose.models[modelName];
 const schemas = mongoose as unknown as { modelSchemas?: Record<string, unknown> };
