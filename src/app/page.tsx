@@ -15,7 +15,7 @@ export default function Dashboard() {
   const { pods } = usePods();
   const { details } = useData();
   const [viewAsPod, setViewAsPod] = useState<string | null>(null);
-  const [selectedMonth, setSelectedMonth] = useState("all");
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => new Date().toLocaleString("en-US", { month: "long" }));
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 
   const availableYears = useMemo(() => {

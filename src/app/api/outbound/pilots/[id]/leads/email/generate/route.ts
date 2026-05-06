@@ -107,6 +107,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const overwrite = !!body.overwrite;
   const isTest = !!body.isTest;
   const onlyWithEmail = body.onlyWithEmail !== false;
+  const includeRejected = !!body.includeRejected;
   const dataPilotId = isTest ? `${id}__test` : id;
   const onlyDomains: string[] | null = Array.isArray(body.onlyDomains) ? body.onlyDomains.map((s: unknown) => String(s).toLowerCase()) : null;
 
@@ -116,6 +117,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (onlyWithEmail) {
     filter.email = { $ne: "" };
     filter.emailStatus = { $in: ["verified", "likely_to_engage"] };
+  }
+  if (!includeRejected) {
+    filter.shouldEmail = { $ne: "no" };
   }
 
   const leads = (await OutboundLead.find(filter)
@@ -208,6 +212,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const remainingFilter: Record<string, unknown> = { pilotId: dataPilotId, claudePrompt: { $ne: "" } };
   if (!overwrite) remainingFilter.body1 = "";
+  if (onlyWithEmail) {
+    remainingFilter.email = { $ne: "" };
+    remainingFilter.emailStatus = { $in: ["verified", "likely_to_engage"] };
+  }
+  if (!includeRejected) remainingFilter.shouldEmail = { $ne: "no" };
   const remaining = await OutboundLead.countDocuments(remainingFilter);
 
   const inUsd = (totalIn / 1_000_000) * HAIKU_INPUT_PER_M;

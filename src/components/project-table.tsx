@@ -104,10 +104,10 @@ function PodDropdown({ value, onChange, pods, podMap, editable = true }: { value
         ref={btnRef}
         type="button"
         onClick={toggle}
-        className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer transition-colors border border-transparent hover:border-slate-200 whitespace-nowrap ${current.bgLight} ${current.text}`}
+        className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium cursor-pointer transition-colors border border-transparent hover:border-slate-200 whitespace-nowrap ${current?.bgLight ?? "bg-slate-100"} ${current?.text ?? "text-slate-600"}`}
       >
-        <div className={`w-2 h-2 rounded-full shrink-0 ${current.color}`} />
-        {current.name}
+        <div className={`w-2 h-2 rounded-full shrink-0 ${current?.color ?? "bg-slate-300"}`} />
+        {current?.name ?? "Unassigned"}
         <svg className={`h-4 w-4 ml-1 transition-transform ${open ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
       </button>
 

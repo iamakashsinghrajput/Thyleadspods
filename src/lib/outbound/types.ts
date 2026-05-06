@@ -129,6 +129,12 @@ export interface LeadResearch {
   valueAngle: string;
   socialProofMatch: string[];
   subjectTopic: string;
+  buyingHypothesis?: string;
+  shouldEmail?: "yes" | "maybe" | "no" | "";
+  shouldEmailReason?: string;
+  confidenceLevel?: "high" | "medium" | "low" | "";
+  buyerSignalScore?: number;
+  evidenceList?: string[];
 }
 
 export interface LeadDraft {

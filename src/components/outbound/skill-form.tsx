@@ -76,6 +76,35 @@ export default function SkillForm({ pilotId, clientName, pipelineRunning, canEdi
     } finally { setBusy(false); }
   }
 
+  async function loadMaster() {
+    if (!user) return;
+    if (skillContent.trim().length > 200 && !confirm(`Replace this pilot's SKILL with the master /SKILL.md (v12) from the repo? Current SKILL will be overwritten.`)) return;
+    setGenBusy(true); setGenErr(null); setGenInfo(null);
+    try {
+      const res = await fetch(`/api/outbound/pilots/${pilotId}/skill/load-master`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actorRole: user.role, actorEmail: user.email }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setGenErr(d.error || `Load failed (${res.status})`);
+        return;
+      }
+      const fresh = await fetch(`/api/outbound/pilots/${pilotId}/skill`, { cache: "no-store" });
+      const fdata = (await fresh.json()) as SkillState;
+      setSkillContent(fdata.skillContent || "");
+      setSkillVersion(fdata.skillVersion || "v12-master");
+      setLoaded(fdata);
+      setGenInfo({ chars: d.chars, lines: d.lines, inputTokens: 0, outputTokens: 0, model: `master file (${d.sourcePath})`, isLive: true, usdCost: 0 });
+      setSavedTick((n) => n + 1);
+    } catch (e) {
+      setGenErr(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setGenBusy(false);
+    }
+  }
+
   async function generate() {
     if (!user) return;
     setGenBusy(true); setGenErr(null); setGenInfo(null); setConfirmRegen(false);
@@ -213,6 +242,15 @@ export default function SkillForm({ pilotId, clientName, pipelineRunning, canEdi
             )}
 
             <span className="ml-auto" />
+
+            <button
+              onClick={loadMaster}
+              disabled={genBusy || pipelineRunning}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+              title="Replace this pilot's SKILL with the master /SKILL.md (v12) from the repo. Forceful — overwrites current SKILL."
+            >
+              {genBusy ? <><Loader2 size={13} className="animate-spin" /> Loading…</> : <><FileText size={13} /> Load master /SKILL.md (v12)</>}
+            </button>
 
             {!skillContent.trim() ? (
               <button

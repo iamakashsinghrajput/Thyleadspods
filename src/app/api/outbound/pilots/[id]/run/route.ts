@@ -18,6 +18,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const startFrom: PhaseKey | undefined = typeof body.startFrom === "string" ? body.startFrom as PhaseKey : undefined;
   const testLimitRaw = Number(body.testLimit);
   const testLimit = Number.isFinite(testLimitRaw) && testLimitRaw > 0 ? Math.min(Math.floor(testLimitRaw), 100) : undefined;
+  const phase8LimitRaw = Number(body.phase8AccountLimit);
+  const phase8AccountLimit = Number.isFinite(phase8LimitRaw) && phase8LimitRaw > 0 ? Math.min(Math.floor(phase8LimitRaw), 2000) : undefined;
+  const forceRegenerate = body.forceRegenerate === true;
+  const accountLimitRaw = Number(body.accountLimit);
+  const accountLimit = Number.isFinite(accountLimitRaw) && accountLimitRaw > 0 ? Math.min(Math.floor(accountLimitRaw), 2000) : undefined;
+  const personalize = body.personalize === true;
 
   const exists = await OutboundPilot.findById(id).lean<{ _id: unknown; pilotName?: string; phases?: Array<{ key: string; status: string }> }>();
   if (!exists) return NextResponse.json({ error: "pilot not found" }, { status: 404 });
@@ -37,7 +43,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
   }
 
-  runPipelineSafe(id, { stopAfter, startFrom, testLimit }).catch(async (err) => {
+  await OutboundPilot.findByIdAndUpdate(id, {
+    status: "running",
+    cancelRequested: false,
+    cancelRequestedAt: null,
+    cancelRequestedBy: "",
+    updatedAt: new Date(),
+  });
+
+  runPipelineSafe(id, { stopAfter, startFrom, testLimit, phase8AccountLimit, forceRegenerate, accountLimit, personalize }).catch(async (err) => {
     await OutboundPilot.findByIdAndUpdate(id, {
       status: "failed",
       updatedAt: new Date(),
@@ -45,5 +59,5 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     console.error("[outbound] pipeline failed", id, err);
   });
 
-  return NextResponse.json({ ok: true, queued: true });
+  return NextResponse.json({ ok: true, queued: true, status: "running" });
 }

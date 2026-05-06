@@ -38,21 +38,20 @@ interface PilotDoc {
     antiIcp?: string[];
     notes?: string;
   };
+  insightStrategy?: {
+    championTitles?: string[];
+    buyerJourneyTitles?: string[];
+    postKeywords?: string[];
+    intentSignalsToPrioritize?: string[];
+    jobTitleKeywordsHiring?: string[];
+    techStackToWatch?: string[];
+    rationale?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 }
 
-const DEFAULT_SOCIAL_PROOF: Record<string, string[]> = {
-  retail: ["BigBasket", "Yuppiechef", "eBay"],
-  apparel: ["Andaaz Fashion", "Attrangi", "Utsav Fashion"],
-  ecommerce: ["BigBasket", "Yuppiechef", "Andaaz Fashion"],
-  fintech: ["PayU", "HDFC Bank"],
-  edtech: ["Online Manipal", "UNext"],
-  saas: ["POSist", "PayScale"],
-  wellness: ["Amway"],
-  marketplace: ["BigBasket", "eBay"],
-  default: ["Indian D2C brands at your stage"],
-};
+// Social proof library + resolveProofPool live in agents/phase8-research.ts (where they're consumed).
 
 function toEnrichedAccount(doc: Record<string, unknown>): EnrichedAccount {
   const num = (v: unknown) => typeof v === "number" ? v : Number(v) || 0;
@@ -284,7 +283,7 @@ class PipelineCancelled extends Error {
   constructor() { super("Pipeline cancelled by user"); this.name = "PipelineCancelled"; }
 }
 
-export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey; startFrom?: PhaseKey; testLimit?: number } = {}): Promise<void> {
+export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey; startFrom?: PhaseKey; testLimit?: number; phase8AccountLimit?: number; forceRegenerate?: boolean; accountLimit?: number; personalize?: boolean } = {}): Promise<void> {
   await OutboundPilot.findByIdAndUpdate(pilotId, {
     cancelRequested: false,
     cancelRequestedAt: null,
@@ -298,14 +297,11 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
   const startIdx = opts.startFrom ? phaseIndex(opts.startFrom) : 0;
   if (startIdx < 0) throw new Error(`unknown startFrom phase: ${opts.startFrom}`);
 
-  if (startIdx > 0) {
+  {
     const phases = ensurePhases(doc.phases);
     const updated = phases.map((p) => {
       const i = phaseIndex(p.key);
-      if (i < startIdx && (p.status === "complete" || p.status === "running" || p.status === "failed")) return p;
-      if (i < startIdx) {
-        return p;
-      }
+      if (i < startIdx) return p;
       return { ...emptyPhaseState(p.key) };
     });
     await OutboundPilot.findByIdAndUpdate(pilotId, { phases: updated, updatedAt: new Date() });
@@ -436,8 +432,54 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
   if (shouldStop("enrich")) { await OutboundPilot.findByIdAndUpdate(pilotId, { status: "paused", updatedAt: new Date() }); return; }
 
   const score = startIdx > phaseIndex("score")
-    ? await loadScoredAccountsForPilot(dataPilotId)
-    : await runPhase(pilotId, "score", async () => {
+    ? await (async () => {
+        const loaded = await loadScoredAccountsForPilot(dataPilotId);
+        if (loaded.top.length === 0) {
+          const leadDocs = (await OutboundLead.find({ pilotId: dataPilotId }).sort({ rank: 1 }).lean()) as unknown as Array<Record<string, unknown>>;
+          if (leadDocs.length > 0) {
+            console.log(`[outbound] score skip: OutboundAccount empty, reconstructing ${leadDocs.length} accounts from existing leads.`);
+            const seen = new Set<string>();
+            const reconstructed: ScoredAccount[] = [];
+            for (const l of leadDocs) {
+              const dom = String(l.accountDomain || "").toLowerCase().trim();
+              if (!dom || seen.has(dom)) continue;
+              seen.add(dom);
+              const seg = String(l.segment || "active");
+              const segNorm: ScoredAccount["segment"] = (["hot", "priority", "active", "nurture", "excluded"].includes(seg) ? seg : "active") as ScoredAccount["segment"];
+              reconstructed.push({
+                domain: dom,
+                name: String(l.companyShort || l.companyFull || dom),
+                industry: String(l.industry || ""),
+                secondaryIndustries: [],
+                estimatedNumEmployees: Number(l.employees) || 0,
+                organizationRevenuePrinted: "",
+                foundedYear: 0,
+                city: "",
+                state: "",
+                country: String(l.country || ""),
+                ownedByOrganization: "",
+                shortDescription: "",
+                keywords: [],
+                dhMarketing: 0,
+                dhEngineering: 0,
+                dhProductManagement: 0,
+                dhSales: 0,
+                headcount6mGrowth: 0,
+                headcount12mGrowth: 0,
+                alexaRanking: 0,
+                linkedinUrl: "",
+                publiclyTradedSymbol: "",
+                score: Number(l.score) || 0,
+                segment: segNorm,
+                scoreBreakdown: {},
+              });
+            }
+            return { all: reconstructed, top: reconstructed };
+          }
+        }
+        return loaded;
+      })()
+    : await runPhase(pilotId, "score", async ({ signal }) => {
         const cfg = config as Record<string, unknown>;
         const projectData = {
           activeClientDomains: new Set<string>(((inputs.activeCustomers as string[] | undefined) || []).map((d) => d.toLowerCase())),
@@ -491,13 +533,25 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
           },
         }));
 
-        const CHUNK = 1000;
+        const CHUNK = 500;
+        const CHUNK_TIMEOUT_MS = 60_000;
         const totalChunks = Math.ceil(ops.length / CHUNK);
         const persistStart = Date.now();
         for (let i = 0; i < ops.length; i += CHUNK) {
+          if (signal.aborted) {
+            r.state.log.push(`Stopped by user at chunk ${Math.floor(i / CHUNK) + 1}/${totalChunks}.`);
+            throw new PipelineCancelled();
+          }
+          if (await isCancelRequested(pilotId)) {
+            r.state.log.push(`Stopped by user at chunk ${Math.floor(i / CHUNK) + 1}/${totalChunks}.`);
+            throw new PipelineCancelled();
+          }
           const chunk = ops.slice(i, i + CHUNK);
-          await OutboundAccount.bulkWrite(chunk, { ordered: false });
           const chunkIdx = Math.floor(i / CHUNK) + 1;
+          await Promise.race([
+            OutboundAccount.bulkWrite(chunk, { ordered: false }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error(`bulkWrite chunk ${chunkIdx} timed out after ${CHUNK_TIMEOUT_MS / 1000}s`)), CHUNK_TIMEOUT_MS)),
+          ]);
           r.state.log.push(`Persisted scores: chunk ${chunkIdx}/${totalChunks} (${Math.min(i + CHUNK, ops.length)}/${ops.length} rows)…`);
           await persistPhase(pilotId, {
             ...emptyPhaseState("score"),
@@ -513,6 +567,12 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
         return { state: r.state, result: r.output };
       });
   if (shouldStop("score")) { await OutboundPilot.findByIdAndUpdate(pilotId, { status: "paused", updatedAt: new Date() }); return; }
+
+  if (opts.accountLimit && opts.accountLimit > 0 && score.top.length > opts.accountLimit) {
+    const before = score.top.length;
+    score.top = score.top.slice(0, opts.accountLimit);
+    console.log(`[outbound] accountLimit=${opts.accountLimit} — capped score.top from ${before} to ${score.top.length}.`);
+  }
 
   const stakeholder = startIdx > phaseIndex("stakeholder")
     ? await (async () => {
@@ -553,9 +613,12 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
           }, { upsert: true });
         }
 
+        const stakeholderConcurrency = (config as { stakeholderConcurrency?: number }).stakeholderConcurrency
+          || (opts.testLimit ? Math.min(opts.testLimit, 10) : 8);
         const r = await stakeholderAgent({
           topAccounts: score.top,
           championTitles: config.championTitles || [],
+          concurrency: stakeholderConcurrency,
           shouldCancel: () => isCancelRequested(pilotId),
           signal,
           onAccount: persistAccount,
@@ -622,6 +685,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
       .map((e) => `${e.domain}::${e.personKey}`),
   );
 
+  const perLeadByKey = new Map<string, import("./agents/phase8b-personalize").PerLeadResearch>();
   const research = startIdx > phaseIndex("research")
     ? await (async () => {
         const loaded = await loadLeadsForPilot(dataPilotId, score.top);
@@ -632,25 +696,29 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
         return { notes, llmTokensIn: 0, llmTokensOut: 0, tavilyCalls: 0, cacheHits: notes.length };
       })()
     : await runPhase(pilotId, "research", async ({ signal }) => {
-        const existingLeads = (await OutboundLead.find({ pilotId: dataPilotId, observationAngle: { $ne: "" } }).lean()) as unknown as Array<Record<string, unknown>>;
         const existingNotes = new Map<string, LeadResearch>();
-        for (const lead of existingLeads) {
-          const dom = String(lead.accountDomain || "").toLowerCase().trim();
-          const obs = String(lead.observationAngle || "").trim();
-          if (dom && obs) {
-            existingNotes.set(dom, {
-              observationAngle: obs,
-              secondaryObservation: String(lead.secondaryObservation || ""),
-              signalForBody3: String(lead.signalForBody3 || ""),
-              theirCustomers: String(lead.theirCustomers || ""),
-              whatTheySell: String(lead.whatTheySell || ""),
-              theirStage: String(lead.theirStage || ""),
-              topPain: String(lead.topPain || ""),
-              valueAngle: String(lead.valueAngle || ""),
-              socialProofMatch: Array.isArray(lead.socialProofMatch) ? (lead.socialProofMatch as string[]) : [],
-              subjectTopic: String(lead.subjectTopic || ""),
-            });
+        if (!opts.forceRegenerate) {
+          const existingLeads = (await OutboundLead.find({ pilotId: dataPilotId, observationAngle: { $ne: "" } }).lean()) as unknown as Array<Record<string, unknown>>;
+          for (const lead of existingLeads) {
+            const dom = String(lead.accountDomain || "").toLowerCase().trim();
+            const obs = String(lead.observationAngle || "").trim();
+            if (dom && obs) {
+              existingNotes.set(dom, {
+                observationAngle: obs,
+                secondaryObservation: String(lead.secondaryObservation || ""),
+                signalForBody3: String(lead.signalForBody3 || ""),
+                theirCustomers: String(lead.theirCustomers || ""),
+                whatTheySell: String(lead.whatTheySell || ""),
+                theirStage: String(lead.theirStage || ""),
+                topPain: String(lead.topPain || ""),
+                valueAngle: String(lead.valueAngle || ""),
+                socialProofMatch: Array.isArray(lead.socialProofMatch) ? (lead.socialProofMatch as string[]) : [],
+                subjectTopic: String(lead.subjectTopic || ""),
+              });
+            }
           }
+        } else {
+          console.log(`[outbound] forceRegenerate=true — skipping existingNotes cache, every account will be re-researched.`);
         }
 
         async function persistNote(n: { domain: string; research: LeadResearch }) {
@@ -666,6 +734,12 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
               valueAngle: n.research.valueAngle || "",
               socialProofMatch: n.research.socialProofMatch || [],
               subjectTopic: n.research.subjectTopic || "",
+              buyingHypothesis: n.research.buyingHypothesis || "",
+              shouldEmail: n.research.shouldEmail || "",
+              shouldEmailReason: n.research.shouldEmailReason || "",
+              confidenceLevel: n.research.confidenceLevel || "",
+              buyerSignalScore: n.research.buyerSignalScore ?? 0,
+              evidenceList: n.research.evidenceList || [],
               updatedAt: new Date(),
             },
           });
@@ -673,7 +747,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
 
         const proofLib = config.socialProofLibrary && Object.keys(config.socialProofLibrary).length > 0
           ? config.socialProofLibrary
-          : DEFAULT_SOCIAL_PROOF;
+          : undefined;
         const cb = doc.clientBrief || {};
         const briefForAgent = {
           sellerProduct: cb.sellerProduct || "",
@@ -688,39 +762,130 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
           notes: cb.notes || "",
         };
         const seenDomains = new Set<string>();
-        const accountLevelRows: typeof allStakeholderRows = [];
+        let accountLevelRows: typeof allStakeholderRows = [];
         for (const r of allStakeholderRows) {
           const dom = (r.account.domain || "").toLowerCase();
           if (seenDomains.has(dom)) continue;
           seenDomains.add(dom);
           accountLevelRows.push(r);
         }
+        const effectiveUseAi = config.useAi === true || opts.forceRegenerate === true;
+        console.log(`[outbound] Phase 8 entry: allStakeholderRows=${allStakeholderRows.length}, unique account-level rows=${accountLevelRows.length}, phase8AccountLimit=${opts.phase8AccountLimit ?? "none"}, useAi=${effectiveUseAi}, forceRegenerate=${!!opts.forceRegenerate}.`);
+        if (accountLevelRows.length === 0) {
+          throw new Error("Phase 8 (research) has 0 input accounts. Production accounts/leads collection is empty for this pilot. Run the full pipeline at least once before regenerating, or check that previous runs wrote to the production pilotId (not __test).");
+        }
+        if (opts.phase8AccountLimit && opts.phase8AccountLimit > 0 && accountLevelRows.length > opts.phase8AccountLimit) {
+          const before = accountLevelRows.length;
+          accountLevelRows = accountLevelRows.slice(0, opts.phase8AccountLimit);
+          console.log(`[outbound] Phase 8 capped to top ${accountLevelRows.length} accounts (of ${before} unique scored accounts) per phase8AccountLimit option.`);
+        }
+        const strat = doc.insightStrategy;
+        const insightStrategyForAgent = strat && (strat.championTitles || []).length > 0 ? {
+          championTitles: strat.championTitles || [],
+          buyerJourneyTitles: strat.buyerJourneyTitles || [],
+          postKeywords: strat.postKeywords || [],
+          intentSignalsToPrioritize: strat.intentSignalsToPrioritize || [],
+          jobTitleKeywordsHiring: strat.jobTitleKeywordsHiring || [],
+          techStackToWatch: strat.techStackToWatch || [],
+          rationale: strat.rationale || "",
+        } : undefined;
         const r = await researchAgent({
           rows: accountLevelRows,
           existingNotes,
           onLead: persistNote,
-          tavilyMaxLeads: config.useAi === true ? accountLevelRows.length : 0,
-          useAi: config.useAi === true,
+          tavilyMaxLeads: effectiveUseAi ? accountLevelRows.length : 0,
+          useAi: effectiveUseAi,
           socialProofLibrary: proofLib,
           shouldCancel: () => isCancelRequested(pilotId),
           signal,
           clientBrief: briefForAgent,
+          insightStrategy: insightStrategyForAgent,
           sellerName: config.sellerName || "VWO",
         });
-        return { state: r.state, result: r.output };
+
+        if (opts.personalize !== true) {
+          return { state: r.state, result: r.output };
+        }
+
+        const { personalizeLeadsAgent } = await import("./agents/phase8b-personalize");
+        const accountNotes = new Map<string, LeadResearch>();
+        for (const n of r.output.notes) accountNotes.set(n.domain, n.research);
+        const personalizeRows = allStakeholderRows.map((row) => ({ account: row.account, stakeholder: row.stakeholder }));
+        console.log(`[outbound] Phase 8 entering personalize stage: ${personalizeRows.length} leads.`);
+        const p = await personalizeLeadsAgent({
+          rows: personalizeRows,
+          accountNotes,
+          clientBrief: briefForAgent,
+          sellerName: config.sellerName || "VWO",
+          concurrency: 5,
+          signal,
+          shouldCancel: () => isCancelRequested(pilotId),
+          onLead: async (w) => {
+            await OutboundLead.updateOne(
+              { pilotId: dataPilotId, accountDomain: w.domain, personKey: w.personKey },
+              {
+                $set: {
+                  observationAngle: w.perLead.observationAngle,
+                  topPain: w.perLead.topPain,
+                  valueAngle: w.perLead.valueAngle,
+                  socialAngle: w.perLead.socialAngle,
+                  evidenceList: w.perLead.evidenceList,
+                  personEvidence: w.perLead.personEvidence,
+                  icpRole: w.perLead.icpRole,
+                  updatedAt: new Date(),
+                },
+              },
+            );
+          },
+        });
+        for (const w of p.output.writes) {
+          perLeadByKey.set(`${w.domain}::${w.personKey}`, w.perLead);
+        }
+        const personalizeMetrics: Record<string, string | number> = {};
+        for (const [k, v] of Object.entries(p.state.metrics || {})) {
+          if (typeof v === "string" || typeof v === "number") personalizeMetrics[`personalize_${k}`] = v;
+        }
+        const mergedState = {
+          log: [...(r.state.log || []), "—— Per-lead personalize stage ——", ...(p.state.log || [])],
+          metrics: { ...(r.state.metrics || {}), ...personalizeMetrics },
+          inputCount: r.state.inputCount,
+          outputCount: r.state.outputCount,
+          llmTokensIn: (r.state.llmTokensIn || 0) + (p.state.llmTokensIn || 0),
+          llmTokensOut: (r.state.llmTokensOut || 0) + (p.state.llmTokensOut || 0),
+        };
+        return { state: mergedState, result: r.output };
       });
   if (shouldStop("research")) { await OutboundPilot.findByIdAndUpdate(pilotId, { status: "paused", updatedAt: new Date() }); return; }
 
+  let skippedByDecision = 0;
   const draftRows = allStakeholderRows
     .filter((r) => draftableLeadKeys.has(`${r.account.domain}::${r.stakeholder.personKey || ""}`))
     .map((r) => {
       const note = research.notes.find((n) => n.domain === r.account.domain);
+      const baseResearch: LeadResearch = note?.research || { observationAngle: "", secondaryObservation: "", signalForBody3: "", theirCustomers: "", whatTheySell: "", theirStage: "", topPain: "", valueAngle: "", socialProofMatch: [], subjectTopic: "" };
+      const perLead = perLeadByKey.get(`${r.account.domain}::${r.stakeholder.personKey || ""}`);
+      const merged: LeadResearch = perLead ? {
+        ...baseResearch,
+        observationAngle: perLead.observationAngle || baseResearch.observationAngle,
+        topPain: perLead.topPain || baseResearch.topPain,
+        valueAngle: perLead.valueAngle || baseResearch.valueAngle,
+      } : baseResearch;
       return {
         account: r.account,
         stakeholder: r.stakeholder,
-        research: note?.research || { observationAngle: "", secondaryObservation: "", signalForBody3: "", theirCustomers: "", whatTheySell: "", theirStage: "", topPain: "", valueAngle: "", socialProofMatch: [], subjectTopic: "" },
+        research: merged,
       };
+    })
+    .filter((r) => {
+      if (r.research.shouldEmail === "no") { skippedByDecision++; return false; }
+      return true;
     });
+  if (skippedByDecision > 0) {
+    await OutboundLead.updateMany(
+      { pilotId: dataPilotId, shouldEmail: "no" },
+      { $set: { claudePrompt: "", validationIssues: ["intelligence_layer_skipped"], shippable: false, updatedAt: new Date() } },
+    );
+  }
 
   await runPhase(pilotId, "draft", async () => {
     const promptRows = draftRows.map((r) => {
@@ -817,7 +982,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
   });
 }
 
-export async function runPipelineSafe(pilotId: string, opts: { stopAfter?: PhaseKey; startFrom?: PhaseKey; testLimit?: number } = {}): Promise<void> {
+export async function runPipelineSafe(pilotId: string, opts: { stopAfter?: PhaseKey; startFrom?: PhaseKey; testLimit?: number; phase8AccountLimit?: number; forceRegenerate?: boolean; accountLimit?: number; personalize?: boolean } = {}): Promise<void> {
   try {
     await runPipeline(pilotId, opts);
   } catch (err) {

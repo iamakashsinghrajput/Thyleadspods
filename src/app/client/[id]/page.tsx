@@ -88,8 +88,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const podLabel = project?.assignedPod ? (podMap[project.assignedPod]?.name ?? "") : "";
 
   const [search, setSearch] = useState("");
-  const [monthFilter, setMonthFilter] = useState("");
-  const availableMonths = useMemo(() => [...new Set(records.map((r) => r.month))], [records]);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [monthFilter, setMonthFilter] = useState<string>(() => new Date().toLocaleString("en-US", { month: "long" }));
+  const availableMonths = useMemo(() => {
+    const currentMonth = new Date().toLocaleString("en-US", { month: "long" });
+    return [...new Set([currentMonth, ...records.map((r) => r.month)])];
+  }, [records]);
   const [showDetailForm, setShowDetailForm] = useState(false);
   const [editingDetailId, setEditingDetailId] = useState<string | null>(null);
   const [detailForm, setDetailForm] = useState({
@@ -130,6 +134,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const filtered = useMemo(() => {
     return records.filter((r) => {
       if (monthFilter && r.month !== monthFilter) return false;
+      if (statusFilter !== "all" && r.meetingStatus !== statusFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         return r.contactName.toLowerCase().includes(q) || r.salesRep.toLowerCase().includes(q) ||
@@ -137,7 +142,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       }
       return true;
     });
-  }, [records, search, monthFilter]);
+  }, [records, search, monthFilter, statusFilter]);
 
   function resetDetailForm() {
     setDetailForm({ month: "", year: "", geo: "India", salesRep: "", meetingDate: "", meetingTime: "", meetingStatus: "scheduled" as MeetingStatus, meetingLink: "", companyName: "", contactName: "", contactTitle: "", contactEmail: "", contactNumber: "" });
@@ -281,6 +286,16 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               >
                 <option value="">All Months</option>
                 {availableMonths.map((m, i) => <option key={`mf-${i}`} value={m}>{m}</option>)}
+              </select>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]"
+              >
+                <option value="all">All Statuses</option>
+                <option value="done">Done</option>
+                <option value="scheduled">Scheduled</option>
+                <option value="pipeline">Pipeline</option>
               </select>
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />

@@ -131,7 +131,10 @@ export default function ClientPortal() {
   const [savingRemark, setSavingRemark] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [monthFilter, setMonthFilter] = useState<string>("all");
+  const [monthFilter, setMonthFilter] = useState<string>(() => {
+    const now = new Date();
+    return `${now.toLocaleDateString("en-US", { month: "long" })} ${now.getFullYear()}`;
+  });
 
   const projectId = user?.projectId || "";
   const meetings: ClientDetail[] = details[projectId] ?? [];
@@ -182,10 +185,11 @@ export default function ClientPortal() {
 
   if (!user) return null;
 
-  const months = [...new Set(meetings.map((m) => `${m.month} ${m.year}`))];
   const now = new Date();
   const currentMonth = now.toLocaleDateString("en-US", { month: "long" });
   const currentYear = now.getFullYear();
+  const currentMonthLabel = `${currentMonth} ${currentYear}`;
+  const months = [...new Set([currentMonthLabel, ...meetings.map((m) => `${m.month} ${m.year}`)])];
   const thisMonthMeetings = meetings.filter((m) => m.month === currentMonth && m.year === currentYear);
 
   const filtered = meetings.filter((m) => {

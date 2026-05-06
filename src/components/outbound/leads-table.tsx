@@ -1,11 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Mail, Check, AlertTriangle, ChevronRight, ChevronLeft, Copy, ExternalLink, Crown, Zap, X, Sparkles, Loader2, Upload, Layers } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import type { PilotLeadRow } from "./types";
 
-type LeadFilter = "all" | "decisionMakers" | "shippable" | "issues" | "emailReady";
+type LeadFilter = "all" | "decisionMakers" | "shippable" | "issues" | "emailReady" | "recommended" | "skipped";
+
+function isRecommended(l: PilotLeadRow): boolean {
+  return l.shouldEmail === "yes" || l.shouldEmail === "maybe" || (!l.shouldEmail && (l.buyerSignalScore || 0) >= 30);
+}
+function isSkipped(l: PilotLeadRow): boolean {
+  return l.shouldEmail === "no";
+}
 
 const DECISION_MAKER_TITLE_RE = /\b(founder|co[- ]?founder|cofounder|ceo|chief executive)\b/i;
 
@@ -35,6 +42,9 @@ export default function LeadsTable({ leads, pilotId, onChanged, isTest }: { lead
   const [active, setActive] = useState<PilotLeadRow | null>(null);
   const [pasteMode, setPasteMode] = useState(false);
   const [bulkMode, setBulkMode] = useState(false);
+  const [expandedKey, setExpandedKey] = useState<string>("");
+  const [expandedFull, setExpandedFull] = useState<{ claudePrompt: string; subject1: string; body1: string; subject2: string; body2: string; subject3: string; body3: string } | null>(null);
+  const [expandLoading, setExpandLoading] = useState(false);
   const [autoBusy, setAutoBusy] = useState(false);
   const [autoMsg, setAutoMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [autoProgress, setAutoProgress] = useState<{ done: number; remaining: number; cost: number } | null>(null);
@@ -49,6 +59,8 @@ export default function LeadsTable({ leads, pilotId, onChanged, isTest }: { lead
       if (filter === "issues" && (l.shippable || l.validationIssues.length === 0)) return false;
       if (filter === "decisionMakers" && !isDecisionMaker(l)) return false;
       if (filter === "emailReady" && !isEmailReady(l)) return false;
+      if (filter === "recommended" && !isRecommended(l)) return false;
+      if (filter === "skipped" && !isSkipped(l)) return false;
       if (!s) return true;
       return (
         l.accountDomain.toLowerCase().includes(s) ||
@@ -64,6 +76,8 @@ export default function LeadsTable({ leads, pilotId, onChanged, isTest }: { lead
   const pendingCount = useMemo(() => leads.filter(isPending).length, [leads]);
   const emailReadyCount = useMemo(() => leads.filter(isEmailReady).length, [leads]);
   const shippableCount = useMemo(() => leads.filter((l) => l.shippable).length, [leads]);
+  const recommendedCount = useMemo(() => leads.filter(isRecommended).length, [leads]);
+  const skippedCount = useMemo(() => leads.filter(isSkipped).length, [leads]);
 
   async function handleImport(file: File) {
     if (!pilotId || !user) return;
@@ -202,6 +216,15 @@ export default function LeadsTable({ leads, pilotId, onChanged, isTest }: { lead
           Founders / CEOs ({decisionMakerCount})
         </FilterTab>
         <FilterTab active={filter === "emailReady"} onClick={() => setFilter("emailReady")}>Email-ready ({emailReadyCount})</FilterTab>
+        {recommendedCount > 0 && (
+          <FilterTab active={filter === "recommended"} onClick={() => setFilter("recommended")} accent>
+            <Sparkles size={11} className="inline -mt-px mr-1" />
+            Recommended ({recommendedCount})
+          </FilterTab>
+        )}
+        {skippedCount > 0 && (
+          <FilterTab active={filter === "skipped"} onClick={() => setFilter("skipped")}>Skipped ({skippedCount})</FilterTab>
+        )}
         <FilterTab active={filter === "shippable"} onClick={() => setFilter("shippable")}>Shippable ({shippableCount})</FilterTab>
         <FilterTab active={filter === "issues"} onClick={() => setFilter("issues")}>Issues ({leads.filter((l) => !l.shippable && l.validationIssues.length > 0).length})</FilterTab>
         {pilotId && (
@@ -280,38 +303,124 @@ export default function LeadsTable({ leads, pilotId, onChanged, isTest }: { lead
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {visible.map((l) => (
-              <tr key={`${l.accountDomain}::${l.personKey}`} onClick={() => setActive(l)} className="cursor-pointer hover:bg-slate-50">
-                <td className="px-3 py-2 tabular-nums text-slate-500">#{l.rank}</td>
-                <td className="px-3 py-2">
-                  <p className="font-medium text-slate-900 truncate max-w-[180px]">{l.companyShort}</p>
-                  <p className="text-[10px] text-slate-400">{l.accountDomain} · score {l.score}</p>
-                </td>
-                <td className="px-3 py-2">
-                  <p className="text-slate-700 truncate max-w-[160px]">{l.fullName || "—"}</p>
-                  <p className="text-[10px] text-slate-400 truncate max-w-[160px]">{l.contactTitle}</p>
-                </td>
-                <td className="px-3 py-2">
-                  <EmailBadge email={l.email} status={l.emailStatus} />
-                </td>
-                <td className="px-3 py-2 text-slate-600">
-                  <p className="truncate max-w-[280px]">{l.observationAngle || "—"}</p>
-                </td>
-                <td className="px-3 py-2 text-right">
-                  {l.shippable ? (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                      <Check size={10} /> ship
-                    </span>
-                  ) : l.validationIssues.length > 0 ? (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
-                      <AlertTriangle size={10} /> {l.validationIssues.length}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-slate-400">—</span>
+            {visible.map((l) => {
+              const key = `${l.accountDomain}::${l.personKey}`;
+              const expanded = expandedKey === key;
+              return (
+                <React.Fragment key={key}>
+                  <tr className="hover:bg-slate-50">
+                    <td className="px-3 py-2 tabular-nums text-slate-500 cursor-pointer" onClick={() => setActive(l)}>#{l.rank}</td>
+                    <td className="px-3 py-2 cursor-pointer" onClick={() => setActive(l)}>
+                      <p className="font-medium text-slate-900 truncate max-w-[180px]">{l.companyShort}</p>
+                      <p className="text-[10px] text-slate-400">{l.accountDomain} · score {l.score}</p>
+                    </td>
+                    <td className="px-3 py-2 cursor-pointer" onClick={() => setActive(l)}>
+                      <p className="text-slate-700 truncate max-w-[160px]">{l.fullName || "—"}</p>
+                      <p className="text-[10px] text-slate-400 truncate max-w-[160px]">{l.contactTitle}</p>
+                    </td>
+                    <td className="px-3 py-2 cursor-pointer" onClick={() => setActive(l)}>
+                      <EmailBadge email={l.email} status={l.emailStatus} />
+                    </td>
+                    <td className="px-3 py-2 text-slate-600 cursor-pointer" onClick={() => setActive(l)}>
+                      <p className="truncate max-w-[280px]">{l.observationAngle || "—"}</p>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (expanded) { setExpandedKey(""); setExpandedFull(null); return; }
+                            setExpandedKey(key);
+                            setExpandedFull(null);
+                            if (pilotId && l.hasPrompt) {
+                              setExpandLoading(true);
+                              try {
+                                const res = await fetch(`/api/outbound/pilots/${pilotId}/leads/full?accountDomain=${encodeURIComponent(l.accountDomain)}&personKey=${encodeURIComponent(l.personKey)}${isTest ? "&test=1" : ""}`);
+                                const data = await res.json();
+                                if (res.ok && data.lead) {
+                                  setExpandedFull({
+                                    claudePrompt: data.lead.claudePrompt || "",
+                                    subject1: data.lead.subject1 || "", body1: data.lead.body1 || "",
+                                    subject2: data.lead.subject2 || "", body2: data.lead.body2 || "",
+                                    subject3: data.lead.subject3 || "", body3: data.lead.body3 || "",
+                                  });
+                                }
+                              } catch {}
+                              setExpandLoading(false);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded border border-slate-200 hover:bg-slate-50"
+                          title="Show prompt + observation inline"
+                        >
+                          {expanded ? <ChevronLeft size={11} className="rotate-90" /> : <ChevronRight size={11} className="rotate-90" />}
+                          {expanded ? "Hide" : "View"}
+                        </button>
+                        {l.shippable ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                            <Check size={10} /> ship
+                          </span>
+                        ) : l.validationIssues.length > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">
+                            <AlertTriangle size={10} /> {l.validationIssues.length}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400">—</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {expanded && (
+                    <tr className="bg-slate-50/50">
+                      <td colSpan={6} className="px-3 py-3">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                          <div className="space-y-2">
+                            <div className="bg-white border border-slate-200 rounded-lg p-2.5">
+                              <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Observation angle</p>
+                              <p className="text-xs text-slate-800">{l.observationAngle || "(none)"}</p>
+                            </div>
+                            {l.buyingHypothesis && (
+                              <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+                                <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wider mb-0.5">Buying hypothesis · {l.confidenceLevel || "—"} conf · signal {l.buyerSignalScore || 0}/100</p>
+                                <p className="text-xs text-slate-800">{l.buyingHypothesis}</p>
+                                {l.shouldEmailReason && <p className="text-[10px] text-amber-800 italic mt-1">→ {l.shouldEmailReason}</p>}
+                              </div>
+                            )}
+                            {l.evidenceList && l.evidenceList.length > 0 && (
+                              <div className="bg-white border border-slate-200 rounded-lg p-2.5">
+                                <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">Evidence ({l.evidenceList.length})</p>
+                                <ul className="space-y-0.5">
+                                  {l.evidenceList.map((e, i) => <li key={i} className="text-[10px] text-slate-700 font-mono">· {e}</li>)}
+                                </ul>
+                              </div>
+                            )}
+                            {l.topPain && (
+                              <div className="bg-white border border-slate-200 rounded-lg p-2.5">
+                                <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-0.5">Top pain</p>
+                                <p className="text-xs text-slate-700">{l.topPain}</p>
+                              </div>
+                            )}
+                          </div>
+                          <div className="bg-white border border-[#6800FF]/30 rounded-lg overflow-hidden">
+                            <div className="bg-[#f0e6ff] border-b border-[#6800FF]/20 px-2.5 py-1.5 flex items-center justify-between">
+                              <p className="text-[10px] font-bold text-[#6800FF] uppercase tracking-wider">Claude prompt for this lead</p>
+                              {expandedFull?.claudePrompt && (
+                                <button
+                                  onClick={() => navigator.clipboard.writeText(expandedFull.claudePrompt)}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-[#6800FF] text-white hover:bg-[#5800DD]"
+                                >
+                                  <Copy size={9} /> Copy
+                                </button>
+                              )}
+                            </div>
+                            <pre className="p-2.5 max-h-[280px] overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-slate-700 bg-slate-50">{expandLoading ? "Loading prompt…" : expandedFull?.claudePrompt || (l.hasPrompt ? "(loading)" : "(no prompt — phase 9 hasn't run yet)")}</pre>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
                   )}
-                </td>
-              </tr>
-            ))}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -405,6 +514,46 @@ function LeadDetail({ lead, onBack, pilotId, isTest }: { lead: PilotLeadRow; onB
           <div className="mt-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
             <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Observation angle</p>
             <p className="text-xs text-slate-700 mt-0.5">{lead.observationAngle}</p>
+          </div>
+        )}
+
+        {(lead.buyingHypothesis || lead.shouldEmail || (lead.evidenceList && lead.evidenceList.length > 0)) && (
+          <div className="mt-3 bg-linear-to-br from-amber-50 to-white border border-amber-200 rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-[10px] font-bold text-amber-800 uppercase tracking-wider inline-flex items-center gap-1.5">
+                <Sparkles size={11} /> Intelligence layer
+              </p>
+              <div className="inline-flex items-center gap-1.5">
+                {lead.shouldEmail && (
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${lead.shouldEmail === "yes" ? "bg-emerald-100 text-emerald-800" : lead.shouldEmail === "maybe" ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-800"}`}>
+                    {lead.shouldEmail === "yes" ? "✓ email" : lead.shouldEmail === "maybe" ? "~ maybe" : "✕ skip"}
+                  </span>
+                )}
+                {lead.confidenceLevel && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">{lead.confidenceLevel} conf</span>
+                )}
+                {(lead.buyerSignalScore ?? 0) > 0 && (
+                  <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded bg-[#f0e6ff] text-[#6800FF]">signal {lead.buyerSignalScore}/100</span>
+                )}
+              </div>
+            </div>
+            {lead.buyingHypothesis && (
+              <div className="bg-white border border-amber-200/70 rounded p-2.5">
+                <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wider mb-0.5">Buying hypothesis</p>
+                <p className="text-[12px] text-slate-800 leading-relaxed">{lead.buyingHypothesis}</p>
+              </div>
+            )}
+            {lead.shouldEmailReason && (
+              <p className="text-[11px] text-amber-900/80 italic">→ {lead.shouldEmailReason}</p>
+            )}
+            {lead.evidenceList && lead.evidenceList.length > 0 && (
+              <div>
+                <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wider mb-1">Evidence ({lead.evidenceList.length})</p>
+                <ul className="space-y-0.5">
+                  {lead.evidenceList.map((e, i) => <li key={i} className="text-[11px] text-slate-700 font-mono">· {e}</li>)}
+                </ul>
+              </div>
+            )}
           </div>
         )}
 

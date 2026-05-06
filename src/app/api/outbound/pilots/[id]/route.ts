@@ -70,6 +70,9 @@ const LEAD_LIST_PROJECTION = {
   topPain: 1, valueAngle: 1, socialProofMatch: 1, subjectTopic: 1,
   subject1: 1, subject2: 1, subject3: 1,
   validationIssues: 1, shippable: 1,
+  buyingHypothesis: 1, shouldEmail: 1, shouldEmailReason: 1, confidenceLevel: 1,
+  buyerSignalScore: 1, evidenceList: 1,
+  socialAngle: 1, personEvidence: 1, icpRole: 1, contactLinkedinUrl: 1,
   claudePromptLen: { $strLenCP: { $ifNull: ["$claudePrompt", ""] } },
   body1Len: { $strLenCP: { $ifNull: ["$body1", ""] } },
   body2Len: { $strLenCP: { $ifNull: ["$body2", ""] } },
@@ -159,6 +162,16 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       shippable: !!l.shippable,
       hasPrompt: promptLen > 0,
       hasFullSequence: b1 > 0 && b2 > 0 && b3 > 0,
+      buyingHypothesis: (l.buyingHypothesis as string) || "",
+      shouldEmail: (l.shouldEmail as string) || "",
+      shouldEmailReason: (l.shouldEmailReason as string) || "",
+      confidenceLevel: (l.confidenceLevel as string) || "",
+      buyerSignalScore: (l.buyerSignalScore as number) || 0,
+      evidenceList: (l.evidenceList as string[]) || [],
+      socialAngle: (l.socialAngle as string) || "",
+      personEvidence: (l.personEvidence as string[]) || [],
+      icpRole: (l.icpRole as string) || "",
+      contactLinkedinUrl: (l.contactLinkedinUrl as string) || "",
     };
   };
 

@@ -7,6 +7,7 @@ const LEADS_PER_ACCOUNT = 5;
 export interface StakeholderInput {
   topAccounts: ScoredAccount[];
   championTitles: string[];
+  concurrency?: number;
   shouldCancel?: () => Promise<boolean>;
   signal?: AbortSignal;
   onAccount?: (row: StakeholderRow, index: number) => Promise<void>;
@@ -182,16 +183,38 @@ export async function stakeholderAgent(input: StakeholderInput): Promise<{ outpu
   log.push(live ? "Apollo live: people search enabled (no credit cost)." : "Apollo mock: deterministic stakeholder pick.");
 
   const searchTitles = mergeDecisionMakerTitles(input.championTitles);
-  log.push(`Searching with ${searchTitles.length} titles (decision-maker priority: founder, co-founder, CEO, chief-level). Up to ${LEADS_PER_ACCOUNT} leads per account.`);
+  const requested = input.concurrency || Math.min(Math.max(input.topAccounts.length, 1), 10);
+  const concurrency = Math.max(1, Math.min(15, Math.min(requested, input.topAccounts.length || 1)));
+  log.push(`Searching with ${searchTitles.length} titles (decision-maker priority: founder, co-founder, CEO, chief-level). Up to ${LEADS_PER_ACCOUNT} leads per account · concurrency ${concurrency}.`);
 
   const rows: StakeholderRow[] = [];
   let found = 0, missed = 0;
   let accountsWithAny = 0;
+  let processed = 0;
+  let cancelled = false;
+  const startedAt = Date.now();
+  let rowSeq = 0;
+  const persistMutex: { p: Promise<void> } = { p: Promise.resolve() };
 
-  for (let i = 0; i < input.topAccounts.length; i++) {
-    if (input.signal?.aborted) { log.push(`Aborted at ${i}/${input.topAccounts.length}.`); break; }
-    if (input.shouldCancel && await input.shouldCancel()) { log.push("Cancelled by user during stakeholder search."); break; }
-    const acc = input.topAccounts[i];
+  async function persistOrdered(row: StakeholderRow): Promise<void> {
+    rowSeq++;
+    const idx = rowSeq - 1;
+    rows.push(row);
+    if (!input.onAccount) return;
+    const next = persistMutex.p.then(async () => {
+      try { await input.onAccount!(row, idx); } catch (err) {
+        log.push(`Persist callback failed for ${row.account.domain}: ${err instanceof Error ? err.message : "unknown"}`);
+      }
+    });
+    persistMutex.p = next;
+    return next;
+  }
+
+  async function processAccount(acc: ScoredAccount, accIdx: number): Promise<void> {
+    if (cancelled) return;
+    if (input.signal?.aborted) { cancelled = true; return; }
+    if (input.shouldCancel && await input.shouldCancel()) { cancelled = true; return; }
+
     const accountStakeholders: Stakeholder[] = [];
     if (live) {
       try {
@@ -217,8 +240,8 @@ export async function stakeholderAgent(input: StakeholderInput): Promise<{ outpu
       } catch (err) {
         const msg = err instanceof Error ? err.message : "unknown";
         if (input.signal?.aborted || /aborted|TimeoutError/i.test(msg)) {
-          log.push(`Aborted at ${acc.domain}: ${msg}`);
-          break;
+          cancelled = true;
+          return;
         }
         log.push(`Search failed for ${acc.domain}: ${msg}`);
       }
@@ -227,31 +250,44 @@ export async function stakeholderAgent(input: StakeholderInput): Promise<{ outpu
     }
 
     if (accountStakeholders.length === 0) {
-      const row: StakeholderRow = { account: acc, stakeholder: null };
-      rows.push(row);
       missed++;
-      if (input.onAccount) {
-        try { await input.onAccount(row, rows.length - 1); } catch (err) {
-          log.push(`Persist callback failed for ${acc.domain}: ${err instanceof Error ? err.message : "unknown"}`);
-        }
+      await persistOrdered({ account: acc, stakeholder: null });
+    } else {
+      accountsWithAny++;
+      for (const s of accountStakeholders) {
+        found++;
+        await persistOrdered({ account: acc, stakeholder: s });
       }
-      continue;
     }
 
-    accountsWithAny++;
-    for (const s of accountStakeholders) {
-      const row: StakeholderRow = { account: acc, stakeholder: s };
-      rows.push(row);
-      found++;
-      if (input.onAccount) {
-        try { await input.onAccount(row, rows.length - 1); } catch (err) {
-          log.push(`Persist callback failed for ${acc.domain}: ${err instanceof Error ? err.message : "unknown"}`);
-        }
-      }
+    processed++;
+    if (processed % 50 === 0 || processed === input.topAccounts.length) {
+      const elapsed = (Date.now() - startedAt) / 1000;
+      const rate = processed / Math.max(elapsed, 1);
+      const remaining = input.topAccounts.length - processed;
+      const eta = Math.round(remaining / Math.max(rate, 0.001));
+      log.push(`Progress: ${processed}/${input.topAccounts.length} accounts (${found} stakeholders) · ${rate.toFixed(1)}/s · ETA ${eta}s · acc#${accIdx + 1}`);
     }
   }
 
-  log.push(`${found} stakeholders found across ${accountsWithAny}/${input.topAccounts.length} accounts. ${missed} accounts missed.`);
+  const queue = input.topAccounts.map((acc, i) => ({ acc, i }));
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      if (cancelled) return;
+      const item = cursor < queue.length ? queue[cursor++] : null;
+      if (!item) return;
+      await processAccount(item.acc, item.i);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  await persistMutex.p;
+
+  if (cancelled) {
+    log.push(`Cancelled at ${processed}/${input.topAccounts.length} accounts.`);
+  }
+
+  log.push(`${found} stakeholders found across ${accountsWithAny}/${input.topAccounts.length} accounts. ${missed} accounts missed. Total time ${Math.round((Date.now() - startedAt) / 1000)}s.`);
 
   return {
     output: { rows, found, missed },

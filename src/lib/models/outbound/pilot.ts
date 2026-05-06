@@ -41,6 +41,20 @@ const ClientBriefSchema = new Schema({
   notes: { type: String, default: "" },
 }, { _id: false });
 
+const InsightStrategySchema = new Schema({
+  championTitles: { type: [String], default: [] },
+  buyerJourneyTitles: { type: [String], default: [] },
+  postKeywords: { type: [String], default: [] },
+  intentSignalsToPrioritize: { type: [String], default: [] },
+  jobTitleKeywordsHiring: { type: [String], default: [] },
+  techStackToWatch: { type: [String], default: [] },
+  rationale: { type: String, default: "" },
+  generatedAt: { type: Date, default: null },
+  generatedBy: { type: String, default: "" },
+  llmTokensIn: { type: Number, default: 0 },
+  llmTokensOut: { type: Number, default: 0 },
+}, { _id: false });
+
 const ConfigSchema = new Schema({
   geoFocus: { type: String, default: "India" },
   priorityTlds: { type: [String], default: ["in", "co.in", "ac.in", "org.in", "net.in", "bank.in"] },
@@ -95,6 +109,7 @@ const OutboundPilotSchema = new Schema({
   status: { type: String, default: "draft" },
   config: { type: ConfigSchema, default: () => ({}) },
   clientBrief: { type: ClientBriefSchema, default: () => ({}) },
+  insightStrategy: { type: InsightStrategySchema, default: () => ({}) },
   inputs: { type: InputsSchema, default: () => ({}) },
   phases: { type: [PhaseStateSchema], default: [] },
   totalApolloCredits: { type: Number, default: 0 },

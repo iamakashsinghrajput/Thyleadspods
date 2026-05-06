@@ -61,6 +61,16 @@ export interface PilotLeadRow {
   shippable: boolean;
   hasPrompt?: boolean;
   hasFullSequence?: boolean;
+  buyingHypothesis?: string;
+  shouldEmail?: string;
+  shouldEmailReason?: string;
+  confidenceLevel?: string;
+  buyerSignalScore?: number;
+  evidenceList?: string[];
+  socialAngle?: string;
+  personEvidence?: string[];
+  icpRole?: string;
+  contactLinkedinUrl?: string;
 }
 
 export interface PilotDetail {
