@@ -22,18 +22,38 @@ import {
 } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import { useAuth } from "@/lib/auth-context";
+import { useNotifications } from "@/lib/notification-context";
 import { useSidebar } from "@/lib/sidebar-context";
 import ConfirmDelete from "@/components/confirm-delete";
+
+interface UserRow { id: string; name: string; email: string; role: string; podId: string }
 
 export default function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const { pods, addPod, deletePod, updatePodMembers } = usePods();
+  const { addNotification } = useNotifications();
   const [editingPodId, setEditingPodId] = useState<string | null>(null);
   const [editMembers, setEditMembers] = useState("");
+  const [allUsers, setAllUsers] = useState<UserRow[]>([]);
+  const [memberSearch, setMemberSearch] = useState("");
   const isAdmin = user?.role === "admin" || user?.role === "superadmin";
   const isSuperadmin = user?.role === "superadmin";
   const [pendingCount, setPendingCount] = useState(0);
+
+  useEffect(() => {
+    if (!isAdmin || !user?.email) { setAllUsers([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/users?actor=${encodeURIComponent(user.email)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setAllUsers(data.users || []);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [isAdmin, user?.email, editingPodId]);
 
   useEffect(() => {
     if (!isSuperadmin || !user?.email) { setPendingCount(0); return; }
@@ -166,32 +186,78 @@ export default function Sidebar() {
                 {pods.map((pod) => (
                   <div key={pod.id}>
                     {editingPodId === pod.id ? (
-                      <div className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5">
+                      <div className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
                         <p className="text-xs font-semibold text-slate-500">{pod.name} — Edit Members</p>
                         {pod.members.length > 0 && (
                           <div className="flex flex-wrap gap-1">
-                            {pod.members.map((mn) => (
-                              <span key={mn} className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[11px] text-slate-700">
-                                {mn}
-                                <button
-                                  onClick={() => updatePodMembers(pod.id, pod.members.filter((x) => x !== mn))}
-                                  className="text-slate-400 hover:text-red-600"
-                                  title={`Remove ${mn} from ${pod.name}`}
-                                >×</button>
-                              </span>
-                            ))}
+                            {pod.members.map((mn) => {
+                              const u = allUsers.find((x) => x.name.toLowerCase() === mn.toLowerCase() || x.name.split(" ")[0].toLowerCase() === mn.toLowerCase());
+                              return (
+                                <span key={mn} className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[11px] text-slate-700" title={u?.email || ""}>
+                                  {mn}
+                                  <button
+                                    onClick={() => updatePodMembers(pod.id, pod.members.filter((x) => x !== mn))}
+                                    className="text-slate-400 hover:text-red-600"
+                                    title={`Remove ${mn} from ${pod.name}`}
+                                  >×</button>
+                                </span>
+                              );
+                            })}
                           </div>
                         )}
                         <input
                           type="text"
-                          value={editMembers}
-                          onChange={(e) => setEditMembers(e.target.value)}
+                          value={memberSearch}
+                          onChange={(e) => setMemberSearch(e.target.value)}
                           className="w-full px-2 py-1 bg-white border border-slate-200 rounded text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#6800FF]"
-                          placeholder="Add members (comma separated)"
+                          placeholder="Search by name or email…"
+                          autoFocus
                         />
+                        <div className="max-h-48 overflow-y-auto border border-slate-200 rounded bg-white">
+                          {(() => {
+                            const q = memberSearch.trim().toLowerCase();
+                            const candidates = allUsers
+                              .filter((u) => ["pod", "admin", "superadmin"].includes(u.role))
+                              .filter((u) => !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+                            if (candidates.length === 0) {
+                              return <div className="px-2 py-3 text-[11px] text-slate-400 text-center">{allUsers.length === 0 ? "Loading users…" : "No matches"}</div>;
+                            }
+                            return candidates.map((u) => {
+                              const firstName = u.name.split(" ")[0];
+                              const isMember = pod.members.some((m) => m.toLowerCase() === firstName.toLowerCase() || m.toLowerCase() === u.name.toLowerCase());
+                              return (
+                                <button
+                                  key={u.id}
+                                  type="button"
+                                  onClick={() => {
+                                    if (isMember) {
+                                      updatePodMembers(pod.id, pod.members.filter((m) => m.toLowerCase() !== firstName.toLowerCase() && m.toLowerCase() !== u.name.toLowerCase()));
+                                    } else {
+                                      updatePodMembers(pod.id, [...pod.members, firstName]);
+                                      addNotification(`You've been added to ${pod.name}`, "pod", pod.id, u.email);
+                                    }
+                                  }}
+                                  className={`w-full text-left px-2 py-1.5 text-xs flex items-center justify-between gap-2 hover:bg-slate-50 transition-colors ${isMember ? "bg-violet-50" : ""}`}
+                                >
+                                  <div className="min-w-0">
+                                    <p className="font-medium text-slate-900 truncate">{u.name}</p>
+                                    <p className="text-[10px] text-slate-500 truncate font-mono">{u.email}</p>
+                                  </div>
+                                  {isMember ? (
+                                    <span className="text-[10px] font-semibold text-[#6800FF] shrink-0">In pod ✓</span>
+                                  ) : (
+                                    <span className="text-[10px] font-semibold text-slate-400 shrink-0">+ Add</span>
+                                  )}
+                                </button>
+                              );
+                            });
+                          })()}
+                        </div>
                         <div className="flex gap-1.5">
-                          <button onClick={() => { updatePodMembers(pod.id, editMembers.split(",").map((m) => m.trim()).filter(Boolean)); setEditingPodId(null); }} className="flex items-center gap-1 px-2 py-1 bg-[#6800FF] hover:bg-[#5800DD] text-white text-xs font-medium rounded transition-colors"><Check size={11} /> Replace all</button>
-                          <button onClick={() => setEditingPodId(null)} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-600 text-xs rounded transition-colors">Done</button>
+                          <button onClick={() => { setEditingPodId(null); setMemberSearch(""); }} className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-600 text-xs rounded transition-colors">Done</button>
+                          {editMembers.trim() && (
+                            <button onClick={() => { updatePodMembers(pod.id, editMembers.split(",").map((m) => m.trim()).filter(Boolean)); setEditingPodId(null); setMemberSearch(""); }} className="flex items-center gap-1 px-2 py-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 text-xs font-medium rounded transition-colors" title="Bulk replace via comma list"><Check size={11} /> Replace all</button>
+                          )}
                         </div>
                       </div>
                     ) : (

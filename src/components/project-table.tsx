@@ -365,6 +365,7 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
     updateProject(projectId, { assignedPod: newPodId });
     if (proj && newPod) {
       addNotification(`Admin assigned "${proj.clientName}" to your pod`, "pod", newPodId);
+      addNotification(`"${proj.clientName}" reassigned to ${newPod.name}`, "admin");
     }
   }
 
@@ -388,7 +389,9 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
       meetingBooked: 0,
     };
     addProject(project);
+    const podName = podMap[project.assignedPod]?.name || project.assignedPod;
     addNotification(`Admin assigned new client "${project.clientName}" to your pod`, "pod", project.assignedPod);
+    addNotification(`New client "${project.clientName}" assigned to ${podName}`, "admin");
     setNewClient({ clientName: "", assignedPod: "pod1", monthlyTargetExternal: "", weeklyTargetExternal: "", monthlyTargetInternal: "" });
     setShowAddForm(false);
   }

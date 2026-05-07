@@ -9,10 +9,19 @@ function isSuperadmin(email: string): boolean {
   return (email || "").toLowerCase() === SUPERADMIN_EMAIL;
 }
 
+async function actorRole(email: string): Promise<string> {
+  if (isSuperadmin(email)) return "superadmin";
+  const e = (email || "").toLowerCase().trim();
+  if (!e) return "";
+  const u = await UserModel.findOne({ email: e }).select("role").lean<{ role?: string }>();
+  return u?.role || "";
+}
+
 export async function GET(req: NextRequest) {
   await connectDB();
   const actor = req.nextUrl.searchParams.get("actor") || "";
-  if (!isSuperadmin(actor)) {
+  const role = await actorRole(actor);
+  if (role !== "superadmin" && role !== "admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const docs = await UserModel.find({}).sort({ createdAt: -1 }).lean();

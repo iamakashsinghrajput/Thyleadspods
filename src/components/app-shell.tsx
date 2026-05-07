@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth-context";
 import LoginPage from "@/components/login-page";
 import Sidebar from "@/components/sidebar";
 import ClientPortal from "@/components/client-portal";
+import NotificationFlash from "@/components/notification-flash";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const { user, hydrated } = useAuth();
@@ -35,6 +36,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="fixed inset-0 z-50 overflow-auto bg-[#F8F9FA]">
         <ClientPortal />
+        <NotificationFlash />
       </div>
     );
   }
@@ -45,6 +47,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <main className="flex-1 overflow-auto bg-slate-100/60">
         {children}
       </main>
+      <NotificationFlash />
     </>
   );
 }

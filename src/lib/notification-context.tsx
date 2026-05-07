@@ -19,6 +19,8 @@ interface NotificationContextType {
   addNotification: (message: string, forRole: "admin" | "pod" | "superadmin", forPodId?: string, forUserEmail?: string) => void;
   markAllRead: (role: "admin" | "pod", podId?: string) => void;
   clearAll: (role: "admin" | "pod", podId?: string) => void;
+  flashes: Notification[];
+  dismissFlash: (id: string) => void;
 }
 
 const NotificationContext = createContext<NotificationContextType | null>(null);
@@ -28,7 +30,13 @@ const POLL_MS = 15_000;
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [flashes, setFlashes] = useState<Notification[]>([]);
   const prevCountRef = useRef(0);
+  const seenIdsRef = useRef<Set<string>>(new Set());
+
+  const dismissFlash = useCallback((id: string) => {
+    setFlashes((prev) => prev.filter((f) => f.id !== id));
+  }, []);
 
   const email = (user?.email || "").toLowerCase();
   const role = user?.role || "";
@@ -66,6 +74,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       const newOnes = incoming.filter((n) => !prevIds.has(n.id));
       if (prevCountRef.current > 0 && newOnes.some((n) => !n.read)) {
         notifyDesktop(newOnes[0]?.message);
+        const freshUnread = newOnes.filter((n) => !n.read && !seenIdsRef.current.has(n.id));
+        for (const n of freshUnread) seenIdsRef.current.add(n.id);
+        if (freshUnread.length > 0) {
+          setFlashes((prev) => [...freshUnread, ...prev].slice(0, 5));
+        }
+      } else if (prevCountRef.current === 0) {
+        for (const n of incoming) seenIdsRef.current.add(n.id);
       }
       prevCountRef.current = incoming.length;
       setNotifications(incoming);
@@ -149,7 +164,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     void fetch(`/api/notifications?${qs.toString()}`, { method: "DELETE" }).then(() => fetchNotifications());
   }, [email, role, podId, fetchNotifications]);
 
-  const value = useMemo(() => ({ notifications, unreadCount, addNotification, markAllRead, clearAll }), [notifications, unreadCount, addNotification, markAllRead, clearAll]);
+  const value = useMemo(() => ({ notifications, unreadCount, addNotification, markAllRead, clearAll, flashes, dismissFlash }), [notifications, unreadCount, addNotification, markAllRead, clearAll, flashes, dismissFlash]);
 
   return (
     <NotificationContext.Provider value={value}>
