@@ -9,4 +9,6 @@ export interface ClientProject {
   targetsAchieved: number;
   meetingCompleted: number;
   meetingBooked: number;
+  websiteUrl?: string;
+  logoUrl?: string;
 }

@@ -38,10 +38,10 @@ interface Preset {
 }
 
 const PRESETS: Preset[] = [
-  { key: "default",     label: "Default pilot",  icon: Target,     enrichSubsetCap: 1500, topNAfterScore: 500,   maxPerIndustry: 50,  apolloCreditsBudget: 1500, bulkEnrichTopN: 600,  useFreeSearchFirst: true,  blurb: "500 leads · ~800 credits." },
-  { key: "wave2",       label: "Wave 2",         icon: TrendingUp, enrichSubsetCap: 3000, topNAfterScore: 1500,  maxPerIndustry: 80,  apolloCreditsBudget: 2500, bulkEnrichTopN: 1000, useFreeSearchFirst: true,  blurb: "1.5K leads · ~1.5K credits." },
-  { key: "smartsweep",  label: "Smart sweep",    icon: Zap,        enrichSubsetCap: 6000, topNAfterScore: 5000,  maxPerIndustry: 200, apolloCreditsBudget: 4000, bulkEnrichTopN: 2000, useFreeSearchFirst: true,  blurb: "5K leads · ~3K credits." },
-  { key: "maxleads",    label: "Maximum leads",  icon: Zap,        enrichSubsetCap: 6000, topNAfterScore: 10000, maxPerIndustry: 500, apolloCreditsBudget: 8000, bulkEnrichTopN: 4000, useFreeSearchFirst: true,  blurb: "ALL eligible · ~6K credits." },
+  { key: "default",     label: "Default pilot",  icon: Target,     enrichSubsetCap: 1500, topNAfterScore: 500,   maxPerIndustry: 50,  apolloCreditsBudget: 1500, bulkEnrichTopN: 0, useFreeSearchFirst: true,  blurb: "500 leads · ~250 email credits." },
+  { key: "wave2",       label: "Wave 2",         icon: TrendingUp, enrichSubsetCap: 3000, topNAfterScore: 1500,  maxPerIndustry: 80,  apolloCreditsBudget: 2500, bulkEnrichTopN: 0, useFreeSearchFirst: true,  blurb: "1.5K leads · ~750 email credits." },
+  { key: "smartsweep",  label: "Smart sweep",    icon: Zap,        enrichSubsetCap: 6000, topNAfterScore: 5000,  maxPerIndustry: 200, apolloCreditsBudget: 4000, bulkEnrichTopN: 0, useFreeSearchFirst: true,  blurb: "5K leads · ~2.5K email credits." },
+  { key: "maxleads",    label: "Maximum leads",  icon: Zap,        enrichSubsetCap: 6000, topNAfterScore: 10000, maxPerIndustry: 500, apolloCreditsBudget: 8000, bulkEnrichTopN: 0, useFreeSearchFirst: true,  blurb: "ALL eligible · ~5K email credits." },
 ];
 
 export default function ConfigForm({ pilotId, initial, eligibleCount, canEdit, pipelineRunning, onSaved, onSavedAndResume }: ConfigFormProps) {
@@ -64,7 +64,7 @@ export default function ConfigForm({ pilotId, initial, eligibleCount, canEdit, p
     setTopNAfterScore(initial.topNAfterScore || 50);
     setMaxPerIndustry(initial.maxPerIndustry || 12);
     setApolloCreditsBudget(initial.apolloCreditsBudget || 700);
-    setBulkEnrichTopN(initial.bulkEnrichTopN ?? 600);
+    setBulkEnrichTopN(initial.bulkEnrichTopN ?? 0);
     setUseFreeSearchFirst(initial.useFreeSearchFirst !== false);
     setUseAi(initial.useAi === true);
     setGeoFocus(initial.geoFocus || "India");

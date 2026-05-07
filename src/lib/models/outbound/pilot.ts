@@ -62,7 +62,7 @@ const ConfigSchema = new Schema({
   topNAfterScore: { type: Number, default: 500 },
   maxPerIndustry: { type: Number, default: 50 },
   apolloCreditsBudget: { type: Number, default: 1500 },
-  bulkEnrichTopN: { type: Number, default: 600 },
+  bulkEnrichTopN: { type: Number, default: 0 },
   useFreeSearchFirst: { type: Boolean, default: true },
   useAi: { type: Boolean, default: false },
   scoringVersion: { type: String, default: "v2" },

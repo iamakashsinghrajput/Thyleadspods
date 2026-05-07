@@ -12,6 +12,7 @@ import {
   Check,
   X,
   Download,
+  Pencil,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
@@ -19,23 +20,9 @@ import type { PodInfo } from "@/lib/pod-context";
 import { useData, type ClientProject } from "@/lib/data-context";
 import { useAuth } from "@/lib/auth-context";
 import { useNotifications } from "@/lib/notification-context";
+import { staticLogoForName, extractDomain, logoFromWebsite } from "@/lib/client-logo";
 
 type HealthStatus = "red" | "amber" | "green";
-
-const clientLogos: Record<string, string> = {
-  thyleads: "/clients/thyleads.png",
-  clevertapin: "/clients/clevertap.png",
-  bluedove: "/clients/bluedove.png",
-  evality: "/clients/evality.png",
-  onecap: "/clients/onecap.png",
-  mynd: "/clients/mynd.png",
-  actyv: "/clients/actyv.png",
-  zigtal: "/clients/zigtal.png",
-  vwo: "/clients/vwo.png",
-  pazo: "/clients/pazo.png",
-  venwiz: "/clients/venwiz.png",
-  infeedo: "/clients/infeedo.png",
-};
 
 function getCompletionPercent(project: ClientProject): number {
   if (project.monthlyTargetInternal === 0) return 0;
@@ -149,6 +136,107 @@ const columns = [
   { key: "achieved", label: "Target Achieved", short: "Achieved", breakpoint: 150, defaultWidth: 180, align: "right" as const },
   { key: "health", label: "Health Status", short: "Health", breakpoint: 130, defaultWidth: 150, align: "center" as const },
 ];
+
+function EditableNameCell({ project, editable, onSave, href, remarkCount, staticLogoSrc }: { project: ClientProject; editable: boolean; onSave: (patch: Partial<ClientProject>) => void; href: string; remarkCount: number; staticLogoSrc: string | null }) {
+  const [editing, setEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState(project.clientName);
+  const [websiteDraft, setWebsiteDraft] = useState(project.websiteUrl || "");
+  const [logoBroken, setLogoBroken] = useState(false);
+
+  const logoSrc = project.logoUrl || (project.websiteUrl ? logoFromWebsite(project.websiteUrl) : "") || staticLogoSrc || "";
+
+  function open() {
+    setNameDraft(project.clientName);
+    setWebsiteDraft(project.websiteUrl || "");
+    setEditing(true);
+  }
+
+  function commit() {
+    const name = nameDraft.trim();
+    const website = websiteDraft.trim();
+    const patch: Partial<ClientProject> = {};
+    if (name && name !== project.clientName) patch.clientName = name;
+    if (website !== (project.websiteUrl || "")) {
+      patch.websiteUrl = website;
+      patch.logoUrl = website ? logoFromWebsite(website) : "";
+    }
+    if (Object.keys(patch).length > 0) onSave(patch);
+    setEditing(false);
+  }
+
+  return (
+    <td className="px-6 py-4 overflow-hidden">
+      <div className="flex items-center gap-3 min-w-0">
+        {logoSrc && !logoBroken ? (
+          <img src={logoSrc} alt={project.clientName} onError={() => setLogoBroken(true)} className="w-8 h-8 rounded-md object-contain bg-white border border-slate-200 shrink-0" />
+        ) : (
+          <div className="w-8 h-8 rounded-md bg-[#f0e6ff] border border-[#e0ccff] flex items-center justify-center text-[#6800FF] shrink-0">
+            <Building2 size={16} />
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 group/name">
+            <Link href={href} className="font-medium text-[#6800FF] hover:text-indigo-800 truncate transition-colors">{project.clientName}</Link>
+            {editable && (
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); open(); }}
+                title="Edit company name + website"
+                className="p-1 rounded hover:bg-[#6800FF]/10 text-slate-400 hover:text-[#6800FF] transition-colors opacity-0 group-hover/name:opacity-100 shrink-0"
+              >
+                <Pencil size={11} />
+              </button>
+            )}
+            {remarkCount > 0 && (
+              <span className="text-[9px] text-[#6800FF] bg-[#6800FF]/10 px-1.5 py-0.5 rounded-full font-semibold shrink-0">{remarkCount} remark{remarkCount > 1 ? "s" : ""}</span>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-400 font-mono">{project.clientId}</p>
+        </div>
+      </div>
+
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40" onClick={() => setEditing(false)}>
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-slate-900 mb-1">Edit company</h3>
+            <p className="text-xs text-slate-500 mb-4">Update the name and add a website — we&apos;ll fetch the favicon via <code className="font-mono text-[10px] bg-slate-100 px-1 py-0.5 rounded">google.com/s2/favicons</code> automatically.</p>
+
+            <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1.5">Company name</label>
+            <input
+              type="text"
+              autoFocus
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10 mb-4"
+            />
+
+            <label className="block text-[11px] font-semibold text-slate-700 uppercase tracking-wider mb-1.5">Website (used for logo)</label>
+            <input
+              type="text"
+              value={websiteDraft}
+              onChange={(e) => setWebsiteDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+              placeholder="e.g. pazo.com or https://www.pazo.com"
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10 mb-1"
+            />
+            {websiteDraft.trim() && (
+              <div className="flex items-center gap-2 mb-3 mt-2 p-2 bg-slate-50 rounded-md">
+                <img src={logoFromWebsite(websiteDraft)} alt="preview" className="w-7 h-7 rounded object-contain bg-white border border-slate-200" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                <div className="text-[10px] text-slate-500 break-all">Logo preview from <span className="font-mono">{extractDomain(websiteDraft)}</span></div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setEditing(false)} className="px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-md">Cancel</button>
+              <button type="button" onClick={commit} className="px-3 py-1.5 text-sm font-medium bg-[#6800FF] hover:bg-[#5800DD] text-white rounded-md">Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </td>
+  );
+}
 
 function EditableTargetCell({ value, editable, onSave }: { value: number; editable: boolean; onSave: (v: number) => void }) {
   const [editing, setEditing] = useState(false);
@@ -447,26 +535,14 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
                       key={project.id}
                       className="hover:bg-slate-50/80 transition-colors group"
                     >
-                      <td className="px-6 py-4 overflow-hidden">
-                        <div className="flex items-center gap-3 min-w-0">
-                          {clientLogos[project.clientName.toLowerCase().replace(/[^a-z]/g, "")] ? (
-                            <img src={clientLogos[project.clientName.toLowerCase().replace(/[^a-z]/g, "")]} alt={project.clientName} className="w-8 h-8 rounded-md object-contain bg-white border border-slate-200 shrink-0" />
-                          ) : (
-                            <div className="w-8 h-8 rounded-md bg-[#f0e6ff] border border-[#e0ccff] flex items-center justify-center text-[#6800FF] shrink-0">
-                              <Building2 size={16} />
-                            </div>
-                          )}
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <Link href={`/client/${project.id}`} className="font-medium text-[#6800FF] hover:text-indigo-800 truncate transition-colors">{project.clientName}</Link>
-                              {(projectRemarkCounts[project.id] || 0) > 0 && (
-                                <span className="text-[9px] text-[#6800FF] bg-[#6800FF]/10 px-1.5 py-0.5 rounded-full font-semibold shrink-0">{projectRemarkCounts[project.id]} remark{projectRemarkCounts[project.id] > 1 ? "s" : ""}</span>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-slate-400 font-mono">{project.clientId}</p>
-                          </div>
-                        </div>
-                      </td>
+                      <EditableNameCell
+                        project={project}
+                        editable={isAdmin}
+                        onSave={(patch) => updateProject(project.id, patch)}
+                        href={`/client/${project.id}`}
+                        remarkCount={projectRemarkCounts[project.id] || 0}
+                        staticLogoSrc={staticLogoForName(project.clientName)}
+                      />
 
                       <td className="px-6 py-4 overflow-hidden">
                         <PodDropdown

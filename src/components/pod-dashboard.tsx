@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import { useData } from "@/lib/data-context";
+import { resolveProjectLogo } from "@/lib/client-logo";
 import NotificationBell from "@/components/notification-bell";
 
 const MONTH_OPTIONS = [
@@ -155,9 +156,7 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
                   >
                     <div className="flex items-start justify-between mb-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-[#f0e6ff] border border-[#e0ccff] flex items-center justify-center text-[#6800FF] shrink-0">
-                          <Building2 size={20} />
-                        </div>
+                        <ClientLogo project={project} />
                         <div>
                           <p className="font-semibold text-slate-900 group-hover:text-[#6800FF] transition-colors">{project.clientName}</p>
                           <p className="text-[11px] text-slate-400 font-mono">{project.clientId}</p>
@@ -214,5 +213,25 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
         </div>
       </div>
     </div>
+  );
+}
+
+function ClientLogo({ project }: { project: { clientName: string; websiteUrl?: string; logoUrl?: string } }) {
+  const [broken, setBroken] = useState(false);
+  const src = resolveProjectLogo(project);
+  if (!src || broken) {
+    return (
+      <div className="w-10 h-10 rounded-lg bg-[#f0e6ff] border border-[#e0ccff] flex items-center justify-center text-[#6800FF] shrink-0">
+        <Building2 size={20} />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={project.clientName}
+      onError={() => setBroken(true)}
+      className="w-10 h-10 rounded-lg object-contain bg-white border border-slate-200 shrink-0"
+    />
   );
 }

@@ -96,11 +96,14 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   }, [records]);
   const [showDetailForm, setShowDetailForm] = useState(false);
   const [editingDetailId, setEditingDetailId] = useState<string | null>(null);
-  const [detailForm, setDetailForm] = useState({
-    month: "", year: "", geo: "India", salesRep: "",
+  const [detailForm, setDetailForm] = useState(() => ({
+    month: new Date().toLocaleString("en-US", { month: "long" }),
+    year: String(new Date().getFullYear()),
+    geo: "India",
+    salesRep: user?.name || "",
     meetingDate: "", meetingTime: "", meetingStatus: "scheduled" as MeetingStatus, meetingLink: "",
     companyName: "", contactName: "", contactTitle: "", contactEmail: "", contactNumber: "",
-  });
+  }));
   const [viewMeeting, setViewMeeting] = useState<ClientDetail | null>(null);
   const [popupRemarks, setPopupRemarks] = useState("");
   const [popupAdditionalInfo, setPopupAdditionalInfo] = useState("");
@@ -144,8 +147,25 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     });
   }, [records, search, monthFilter, statusFilter]);
 
+  const monthCounts = useMemo(() => {
+    const scope = records.filter((r) => !monthFilter || r.month === monthFilter);
+    return {
+      done: scope.filter((r) => r.meetingStatus === "done").length,
+      scheduled: scope.filter((r) => r.meetingStatus === "scheduled").length,
+      pipeline: scope.filter((r) => r.meetingStatus === "pipeline").length,
+      total: scope.length,
+    };
+  }, [records, monthFilter]);
+
   function resetDetailForm() {
-    setDetailForm({ month: "", year: "", geo: "India", salesRep: "", meetingDate: "", meetingTime: "", meetingStatus: "scheduled" as MeetingStatus, meetingLink: "", companyName: "", contactName: "", contactTitle: "", contactEmail: "", contactNumber: "" });
+    setDetailForm({
+      month: new Date().toLocaleString("en-US", { month: "long" }),
+      year: String(new Date().getFullYear()),
+      geo: "India",
+      salesRep: user?.name || "",
+      meetingDate: "", meetingTime: "", meetingStatus: "scheduled" as MeetingStatus, meetingLink: "",
+      companyName: "", contactName: "", contactTitle: "", contactEmail: "", contactNumber: "",
+    });
     setShowDetailForm(false);
     setEditingDetailId(null);
   }
@@ -277,7 +297,26 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-slate-800">Meeting Details</h2>
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <h2 className="text-base font-semibold text-slate-800">Meeting Details</h2>
+              <div className="flex items-center gap-1.5 text-[11px]">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold tabular-nums" title={monthFilter ? `Done in ${monthFilter}` : "Done across all months"}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  {monthCounts.done} done
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 border border-sky-200 text-sky-700 font-semibold tabular-nums" title={monthFilter ? `Scheduled in ${monthFilter}` : "Scheduled across all months"}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+                  {monthCounts.scheduled} scheduled
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 font-semibold tabular-nums" title={monthFilter ? `Pipeline in ${monthFilter}` : "Pipeline across all months"}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                  {monthCounts.pipeline} pipeline
+                </span>
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700 font-semibold tabular-nums">
+                  {monthCounts.total} total · {monthFilter || "all months"}
+                </span>
+              </div>
+            </div>
             <div className="flex items-center gap-2">
               <select
                 value={monthFilter}

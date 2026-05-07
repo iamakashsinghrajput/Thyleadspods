@@ -28,19 +28,14 @@ const POLL_MS = 15_000;
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const prevCountRef = useRef(0);
 
   const email = (user?.email || "").toLowerCase();
   const role = user?.role || "";
   const podId = user?.podId || "";
 
-  const playSound = useCallback((message?: string) => {
+  const notifyDesktop = useCallback((message?: string) => {
     try {
-      if (audioRef.current && audioRef.current.paused) {
-        audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(() => {});
-      }
       if (typeof window !== "undefined" && "Notification" in window && window.Notification.permission === "granted" && document.hidden) {
         new window.Notification("Thyleads — Notification", {
           body: message || "You have a new notification",
@@ -52,8 +47,6 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, []);
 
   useEffect(() => {
-    audioRef.current = new Audio("/notification.mp3");
-    audioRef.current.volume = 1.0;
     if (typeof window !== "undefined" && "Notification" in window && window.Notification.permission === "default") {
       window.Notification.requestPermission();
     }
@@ -72,13 +65,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       const prevIds = new Set<string>(notifications.map((n) => n.id));
       const newOnes = incoming.filter((n) => !prevIds.has(n.id));
       if (prevCountRef.current > 0 && newOnes.some((n) => !n.read)) {
-        playSound(newOnes[0]?.message);
+        notifyDesktop(newOnes[0]?.message);
       }
       prevCountRef.current = incoming.length;
       setNotifications(incoming);
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [email, role, podId, playSound]);
+  }, [email, role, podId, notifyDesktop]);
 
   useEffect(() => {
     if (!email) {

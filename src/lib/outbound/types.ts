@@ -135,6 +135,9 @@ export interface LeadResearch {
   confidenceLevel?: "high" | "medium" | "low" | "";
   buyerSignalScore?: number;
   evidenceList?: string[];
+  socialAngle?: string;
+  personEvidence?: string[];
+  icpRole?: string;
 }
 
 export interface LeadDraft {

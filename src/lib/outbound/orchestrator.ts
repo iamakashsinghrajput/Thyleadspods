@@ -262,6 +262,15 @@ async function loadLeadsForPilot(pilotId: string, top: ScoredAccount[]): Promise
       valueAngle: str(d.valueAngle),
       socialProofMatch: Array.isArray(d.socialProofMatch) ? d.socialProofMatch.map(String) : [],
       subjectTopic: str(d.subjectTopic),
+      buyingHypothesis: str(d.buyingHypothesis),
+      shouldEmail: (str(d.shouldEmail) as LeadResearch["shouldEmail"]) || "",
+      shouldEmailReason: str(d.shouldEmailReason),
+      confidenceLevel: (str(d.confidenceLevel) as LeadResearch["confidenceLevel"]) || "",
+      buyerSignalScore: num(d.buyerSignalScore),
+      evidenceList: Array.isArray(d.evidenceList) ? d.evidenceList.map(String) : [],
+      socialAngle: str(d.socialAngle),
+      personEvidence: Array.isArray(d.personEvidence) ? d.personEvidence.map(String) : [],
+      icpRole: str(d.icpRole),
     } : null;
     const draft = str(d.body1) ? {
       subject1: str(d.subject1), body1: str(d.body1),
@@ -665,7 +674,7 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
 
     const r = await emailMatchAgent({
       rows: stakeholder.rows,
-      apolloCreditsBudget: (config.apolloCreditsBudget || 1500) - score.top.length,
+      apolloCreditsBudget: config.apolloCreditsBudget || 1500,
       existingEmails,
       onBatch: persistEmails,
       shouldCancel: () => isCancelRequested(pilotId),
@@ -869,6 +878,10 @@ export async function runPipeline(pilotId: string, opts: { stopAfter?: PhaseKey;
         observationAngle: perLead.observationAngle || baseResearch.observationAngle,
         topPain: perLead.topPain || baseResearch.topPain,
         valueAngle: perLead.valueAngle || baseResearch.valueAngle,
+        socialAngle: perLead.socialAngle || baseResearch.socialAngle,
+        personEvidence: perLead.personEvidence && perLead.personEvidence.length > 0 ? perLead.personEvidence : baseResearch.personEvidence,
+        evidenceList: perLead.evidenceList && perLead.evidenceList.length > 0 ? perLead.evidenceList : baseResearch.evidenceList,
+        icpRole: perLead.icpRole || baseResearch.icpRole,
       } : baseResearch;
       return {
         account: r.account,

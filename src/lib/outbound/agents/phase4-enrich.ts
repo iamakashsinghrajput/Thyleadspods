@@ -205,7 +205,9 @@ export async function enrichAgent(input: EnrichInput): Promise<{ output: EnrichO
   const bulkEnrichTopN = input.bulkEnrichTopN ?? Number.MAX_SAFE_INTEGER;
   const log: string[] = [];
   log.push(live
-    ? `Apollo live. Strategy: ${useFreeSearch ? "free search → top-" + bulkEnrichTopN + " bulk_enrich" : "bulk_enrich only"}.`
+    ? bulkEnrichTopN === 0
+      ? "Apollo live. Strategy: FREE search only (mixed_companies/search). No credits spent in Phase 4 — credits reserved for Phase 7 email_match."
+      : `Apollo live. Strategy: ${useFreeSearch ? "free search → top-" + bulkEnrichTopN + " bulk_enrich" : "bulk_enrich only"}.`
     : "Apollo mock: APOLLO_API_KEY not set, returning deterministic mock data.");
 
   const cache = input.existingAccounts || new Map<string, EnrichedAccount>();
