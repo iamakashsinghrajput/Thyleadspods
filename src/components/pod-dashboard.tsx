@@ -12,7 +12,9 @@ import {
 } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import { useData } from "@/lib/data-context";
+import { useAuth } from "@/lib/auth-context";
 import { resolveProjectLogo } from "@/lib/client-logo";
+import { isInCurrentWeek } from "@/lib/week-range";
 import NotificationBell from "@/components/notification-bell";
 
 const MONTH_OPTIONS = [
@@ -20,15 +22,40 @@ const MONTH_OPTIONS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-export default function PodDashboard({ podId, userName }: { podId: string; userName: string }) {
+export default function PodDashboard({ podId, userName, impersonateMember }: { podId: string; userName: string; impersonateMember?: string }) {
   const { podMap } = usePods();
   const { projects, details, metrics } = useData();
+  const { user } = useAuth();
 
   const [selectedMonth, setSelectedMonth] = useState<string>(() => MONTH_OPTIONS[new Date().getMonth()]);
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
 
   const pod = podMap[podId];
-  const podProjects = projects.filter((p) => p.assignedPod === podId);
+  const podMemberSet = useMemo(() => {
+    if (!pod) return new Set<string>();
+    return new Set(pod.members.map((m) => m.toLowerCase()));
+  }, [pod]);
+
+  const isImpersonating = !!impersonateMember;
+  const viewerFirstName = (impersonateMember || user?.name || userName || "").split(" ")[0].toLowerCase();
+  const isPodViewer = isImpersonating || user?.role === "pod";
+
+  const podProjects = useMemo(() => {
+    if (isPodViewer && viewerFirstName) {
+      return projects.filter((p) => {
+        const assigned = p.assignedMembers || [];
+        if (assigned.length > 0) {
+          return assigned.some((m) => m.toLowerCase() === viewerFirstName);
+        }
+        return podId ? p.assignedPod === podId : false;
+      });
+    }
+    return projects.filter((p) => {
+      if (p.assignedPod === podId) return true;
+      const assigned = p.assignedMembers || [];
+      return assigned.some((m) => podMemberSet.has(m.toLowerCase()));
+    });
+  }, [projects, podId, podMemberSet, isPodViewer, viewerFirstName]);
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 
   const availableYears = useMemo(() => {
@@ -48,11 +75,38 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
   const totalTarget = podProjects.reduce((s, p) => s + p.monthlyTargetInternal, 0);
   const totalCompleted = podProjects.reduce((s, p) => s + (completedByProject[p.id] || 0), 0);
   const avgCompletion = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0;
-  const atRisk = podProjects.filter((p) => p.monthlyTargetInternal > 0 && Math.round(((completedByProject[p.id] || 0) / p.monthlyTargetInternal) * 100) < 50).length;
+  const atRisk = podProjects.filter((p) => {
+    const t = p.weeklyTargetExternal > 0 ? p.weeklyTargetExternal : (p.monthlyTargetInternal > 0 ? Math.ceil(p.monthlyTargetInternal / 4) : 0);
+    if (t === 0) return false;
+    let weekDone = 0;
+    for (const d of details[p.id] || []) {
+      if (d.meetingStatus === "done" && isInCurrentWeek(d.meetingDate)) weekDone++;
+    }
+    return Math.round((weekDone / t) * 100) < 50;
+  }).length;
+
+  const weeklyDoneByProject = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [projectId, list] of Object.entries(details)) {
+      let count = 0;
+      for (const d of list) {
+        if (d.meetingStatus === "done" && isInCurrentWeek(d.meetingDate)) count++;
+      }
+      out[projectId] = count;
+    }
+    return out;
+  }, [details]);
+
+  function getWeeklyTarget(p: typeof podProjects[0]): number {
+    if (p.weeklyTargetExternal > 0) return p.weeklyTargetExternal;
+    if (p.monthlyTargetInternal > 0) return Math.ceil(p.monthlyTargetInternal / 4);
+    return 0;
+  }
 
   function getHealth(p: typeof podProjects[0]) {
-    if (p.monthlyTargetInternal === 0) return { color: "bg-slate-400", label: "N/A" };
-    const pct = Math.round(((completedByProject[p.id] || 0) / p.monthlyTargetInternal) * 100);
+    const target = getWeeklyTarget(p);
+    if (target === 0) return { color: "bg-slate-400", label: "N/A" };
+    const pct = Math.round(((weeklyDoneByProject[p.id] || 0) / target) * 100);
     if (pct >= 75) return { color: "bg-emerald-500", label: "On Track" };
     if (pct >= 50) return { color: "bg-amber-400", label: "Needs Attention" };
     return { color: "bg-red-500", label: "At Risk" };
@@ -64,7 +118,7 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
         <div className="flex items-start justify-between">
           <div>
             <p className="text-sm font-medium text-[#6800FF] tracking-wide uppercase mb-1">
-              {pod?.name ?? "Pod"} Workspace
+              {isImpersonating ? `${impersonateMember}'s Workspace` : isPodViewer ? "Member Workspace" : `${pod?.name ?? "Team"} Workspace`}
             </p>
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
               Welcome, {userName}
@@ -131,7 +185,12 @@ export default function PodDashboard({ podId, userName }: { podId: string; userN
         </div>
 
         <div>
-          <h2 className="text-lg font-semibold text-slate-800 mb-4">Assigned Clients</h2>
+          <div className="flex items-baseline justify-between mb-4 gap-3 flex-wrap">
+            <h2 className="text-lg font-semibold text-slate-800">{isPodViewer ? "Your Clients" : "Assigned Clients"}</h2>
+            {isPodViewer && (
+              <p className="text-[11px] text-slate-500">Showing clients you&apos;re personally assigned to. Clients without explicit member assignments fall back to your team.</p>
+            )}
+          </div>
 
           {podProjects.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-16 text-center">

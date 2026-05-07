@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import { useData } from "@/lib/data-context";
+import { isInCurrentWeek } from "@/lib/week-range";
 
 interface StatCardsProps {
   selectedMonth: string;
@@ -18,6 +19,13 @@ interface StatCardsProps {
 export default function StatCards({ selectedMonth, selectedYear }: StatCardsProps) {
   const { pods } = usePods();
   const { projects, details } = useData();
+
+  const totalMembers = useMemo(() => {
+    const set = new Set<string>();
+    for (const pod of pods) for (const m of pod.members) set.add(m.toLowerCase());
+    for (const p of projects) for (const m of p.assignedMembers || []) set.add(m.toLowerCase());
+    return set.size;
+  }, [pods, projects]);
 
   const projectStats = useMemo(() => {
     if (selectedMonth === "all") return null;
@@ -39,14 +47,19 @@ export default function StatCards({ selectedMonth, selectedYear }: StatCardsProp
     : projects.reduce((s, p) => s + (p.meetingCompleted || 0), 0);
   const avgCompletion = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0;
   const atRisk = projects.filter((p) => {
-    const completed = projectStats ? (projectStats[p.id]?.completed || 0) : (p.meetingCompleted || 0);
-    return p.monthlyTargetInternal > 0 && Math.round((completed / p.monthlyTargetInternal) * 100) < 50;
+    const t = p.weeklyTargetExternal > 0 ? p.weeklyTargetExternal : (p.monthlyTargetInternal > 0 ? Math.ceil(p.monthlyTargetInternal / 4) : 0);
+    if (t === 0) return false;
+    let weekDone = 0;
+    for (const d of details[p.id] || []) {
+      if (d.meetingStatus === "done" && isInCurrentWeek(d.meetingDate)) weekDone++;
+    }
+    return Math.round((weekDone / t) * 100) < 50;
   }).length;
 
   const cards = [
     {
-      label: "Active Pods",
-      value: pods.length,
+      label: "Active Members",
+      value: totalMembers,
       sub: `${totalProjects} projects`,
       icon: Users,
       accent: "text-[#6800FF]",
@@ -72,9 +85,9 @@ export default function StatCards({ selectedMonth, selectedYear }: StatCardsProp
       border: "border-sky-100",
     },
     {
-      label: "At Risk",
+      label: "At Risk (this week)",
       value: atRisk,
-      sub: "below 50% target",
+      sub: "below 50% weekly target",
       icon: AlertTriangle,
       accent: "text-amber-600",
       bg: "bg-amber-50",

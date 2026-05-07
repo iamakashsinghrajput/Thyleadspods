@@ -19,7 +19,7 @@ export default function PodViewPage({ params }: { params: Promise<{ id: string }
   if (!pod) {
     return (
       <div className="min-h-full flex items-center justify-center">
-        <p className="text-slate-500">Pod not found</p>
+        <p className="text-slate-500">Member workspace not found</p>
       </div>
     );
   }

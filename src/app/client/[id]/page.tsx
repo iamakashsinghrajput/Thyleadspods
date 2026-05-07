@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useNotifications } from "@/lib/notification-context";
 import { usePods } from "@/lib/pod-context";
 import type { ClientDetail, MeetingStatus } from "@/lib/client-data";
+import { fireSideCannons } from "@/lib/confetti-side-cannons";
 import ConfirmDelete from "@/components/confirm-delete";
 
 const inputClass = "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]";
@@ -189,20 +190,32 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       addDetail(id, { id: newId, meetingId, ...payload, accountManager: "", remarks: "", additionalInfo: "", meetingSummary: "" });
     }
     resetDetailForm();
-    if (wasNew && payload.meetingStatus === "done" && isPod) {
+    const canCelebrate = user?.role === "pod" || user?.role === "admin" || user?.role === "superadmin";
+    if (wasNew && canCelebrate) {
       const target = project?.monthlyTargetInternal || 0;
-      const newDoneCount = monthCounts.done + 1;
-      const remaining = Math.max(0, target - newDoneCount);
       let message: string;
-      if (target === 0) {
-        message = `${newDoneCount} done — keep going!`;
-      } else if (remaining === 0) {
-        message = `${newDoneCount} done · target hit! 🏆`;
-      } else if (remaining === 1) {
-        message = `${newDoneCount} done · just 1 more to go!`;
+      if (payload.meetingStatus === "done") {
+        const newDoneCount = monthCounts.done + 1;
+        const remaining = Math.max(0, target - newDoneCount);
+        if (target === 0) {
+          message = `${newDoneCount} done — keep going!`;
+        } else if (remaining === 0) {
+          message = `${newDoneCount} done · target hit! 🏆`;
+        } else if (remaining === 1) {
+          message = `${newDoneCount} done · just 1 more to go!`;
+        } else {
+          message = `${newDoneCount} done · ${remaining} more to go, keep it up!`;
+        }
+      } else if (payload.meetingStatus === "scheduled") {
+        const upcoming = monthCounts.scheduled + 1;
+        message = `${upcoming} scheduled · keep filling the calendar!`;
+      } else if (payload.meetingStatus === "pipeline") {
+        const pipelineNow = monthCounts.pipeline + 1;
+        message = `${pipelineNow} in pipeline · keep building momentum!`;
       } else {
-        message = `${newDoneCount} done · ${remaining} more to go, keep it up!`;
+        message = `Meeting added — keep it up!`;
       }
+      fireSideCannons(3000);
       setCelebration(message);
       setTimeout(() => setCelebration(null), 3500);
     }
@@ -299,17 +312,25 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="min-h-full">
-      {celebration && <ConfettiCelebration message={celebration} onClose={() => setCelebration(null)} />}
+      {celebration && <CelebrationBanner message={celebration} onClose={() => setCelebration(null)} />}
       <div className="px-8 pt-8 pb-4">
         <button onClick={() => router.push("/")} className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-[#6800FF] transition-colors mb-4">
           <ArrowLeft size={14} />
           Back
         </button>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{clientName}</h1>
-            <p className="text-sm text-slate-400 mt-0.5 font-mono">{project?.clientId} &middot; {podLabel}</p>
+            <p className="text-sm text-slate-400 mt-0.5 font-mono">{project?.clientId}</p>
           </div>
+          {project?.assignedMembers && project.assignedMembers.length > 0 && (
+            <div className="ml-auto flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Handled by</span>
+              {project.assignedMembers.map((m) => (
+                <span key={m} className="inline-flex items-center px-2 py-0.5 bg-violet-50 border border-violet-200 text-violet-700 rounded-md text-xs font-semibold">{m}</span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -815,63 +836,25 @@ function MeetingStatCard({ label, value, pct, pctLabel, footerOverride, scope, i
   );
 }
 
-function ConfettiCelebration({ message, onClose }: { message: string; onClose: () => void }) {
-  const pieces = Array.from({ length: 60 });
+function CelebrationBanner({ message, onClose }: { message: string; onClose: () => void }) {
   return (
-    <>
-      <div className="fixed inset-0 z-[100] pointer-events-none overflow-hidden">
-        {pieces.map((_, i) => {
-          const left = Math.random() * 100;
-          const delay = Math.random() * 0.4;
-          const duration = 1.5 + Math.random() * 1.2;
-          const colors = ["#6800FF", "#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#FF8FAB", "#FFA94D"];
-          const color = colors[i % colors.length];
-          const rotate = Math.random() * 720 - 360;
-          const drift = (Math.random() - 0.5) * 200;
-          const size = 8 + Math.random() * 8;
-          const isCircle = Math.random() > 0.5;
-          return (
-            <span
-              key={i}
-              className="absolute top-0 will-change-transform"
-              style={{
-                left: `${left}%`,
-                width: `${size}px`,
-                height: `${size}px`,
-                background: color,
-                borderRadius: isCircle ? "50%" : "2px",
-                animation: `confetti-fall ${duration}s ease-out ${delay}s forwards`,
-                ["--drift" as string]: `${drift}px`,
-                ["--rotate" as string]: `${rotate}deg`,
-              } as React.CSSProperties}
-            />
-          );
-        })}
-      </div>
-      <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[101] pointer-events-auto">
-        <div onClick={onClose} className="cursor-pointer flex items-center gap-3 px-5 py-3 bg-linear-to-br from-[#6800FF] to-[#9B4DFF] text-white rounded-2xl shadow-2xl animate-celebration-pop ring-4 ring-[#6800FF]/20">
-          <span className="text-2xl">🎉</span>
-          <div className="text-left">
-            <p className="text-xs font-bold uppercase tracking-wider opacity-80">Congrats!</p>
-            <p className="text-sm font-bold">{message}</p>
-          </div>
+    <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[101] pointer-events-auto">
+      <div onClick={onClose} className="cursor-pointer flex items-center gap-3 px-5 py-3 bg-white rounded-2xl shadow-lg ring-1 ring-slate-200/80 border border-slate-100 animate-celebration-pop">
+        <span className="text-2xl">🎉</span>
+        <div className="text-left">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[#6800FF]">Congrats!</p>
+          <p className="text-sm font-bold text-slate-800">{message}</p>
         </div>
       </div>
       <style jsx global>{`
-        @keyframes confetti-fall {
-          0% { transform: translate3d(0, -10vh, 0) rotate(0deg); opacity: 1; }
-          100% { transform: translate3d(var(--drift), 110vh, 0) rotate(var(--rotate)); opacity: 0; }
-        }
         @keyframes celebration-pop {
           0% { transform: translateY(-30px) scale(0.6); opacity: 0; }
           50% { transform: translateY(8px) scale(1.05); opacity: 1; }
           70% { transform: translateY(-2px) scale(0.98); }
           100% { transform: translateY(0) scale(1); opacity: 1; }
         }
-        .animate-celebration-pop {
-          animation: celebration-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-        }
+        .animate-celebration-pop { animation: celebration-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
       `}</style>
-    </>
+    </div>
   );
 }

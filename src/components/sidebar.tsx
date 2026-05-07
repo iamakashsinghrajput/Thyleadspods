@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
@@ -21,6 +21,7 @@ import {
   Shield,
 } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
+import { useData } from "@/lib/data-context";
 import { useAuth } from "@/lib/auth-context";
 import { useNotifications } from "@/lib/notification-context";
 import { useSidebar } from "@/lib/sidebar-context";
@@ -32,7 +33,27 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const { pods, addPod, deletePod, updatePodMembers } = usePods();
+  const { projects } = useData();
   const { addNotification } = useNotifications();
+
+  const allMembers = useMemo(() => {
+    const m = new Map<string, { firstName: string; podId: string; podName: string; podColor: string }>();
+    for (const pod of pods) {
+      for (const member of pod.members) {
+        const firstName = member.split(" ")[0];
+        const key = firstName.toLowerCase();
+        if (!m.has(key)) m.set(key, { firstName, podId: pod.id, podName: pod.name, podColor: pod.color });
+      }
+    }
+    for (const p of projects) {
+      for (const member of p.assignedMembers || []) {
+        const firstName = member.split(" ")[0];
+        const key = firstName.toLowerCase();
+        if (!m.has(key)) m.set(key, { firstName, podId: "", podName: "", podColor: "bg-slate-300" });
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => a.firstName.localeCompare(b.firstName));
+  }, [pods, projects]);
   const [editingPodId, setEditingPodId] = useState<string | null>(null);
   const [editMembers, setEditMembers] = useState("");
   const [allUsers, setAllUsers] = useState<UserRow[]>([]);
@@ -46,6 +67,7 @@ export default function Sidebar() {
   const [podName, setPodName] = useState("");
   const [newPodMembers, setNewPodMembers] = useState<string[]>([]);
   const [newPodSearch, setNewPodSearch] = useState("");
+  const [manageTeamsOpen, setManageTeamsOpen] = useState(false);
 
   useEffect(() => {
     if (!isAdmin || !user?.email) { setAllUsers([]); return; }
@@ -179,12 +201,38 @@ export default function Sidebar() {
         {isAdmin && (
           <div className="p-3 pt-1">
             <button onClick={() => setPodsOpen(!podsOpen)} className="flex items-center justify-between w-full px-3 py-2 group cursor-pointer">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider group-hover:text-slate-600 transition-colors">Pods ({pods.length})</span>
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider group-hover:text-slate-600 transition-colors">Members ({allMembers.length})</span>
               <ChevronDown size={14} className={`text-slate-400 transition-transform duration-200 ${podsOpen ? "rotate-180" : ""}`} />
             </button>
 
             {podsOpen && (
               <div className="space-y-1 mt-1">
+                {allMembers.map((m) => {
+                  const projectsForMember = projects.filter((p) => (p.assignedMembers || []).some((x) => x.toLowerCase() === m.firstName.toLowerCase()));
+                  return (
+                    <Link
+                      key={m.firstName}
+                      href={`/?as=${encodeURIComponent(m.firstName)}`}
+                      className="px-3 py-2 rounded-lg hover:bg-slate-50 transition-all flex items-center gap-2.5 group/mem"
+                    >
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${m.podColor}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-700 group-hover/mem:text-[#6800FF] transition-colors truncate">{m.firstName}</p>
+                        <p className="text-[10px] text-slate-400 truncate">{projectsForMember.length} project{projectsForMember.length === 1 ? "" : "s"}{m.podName ? ` · ${m.podName}` : ""}</p>
+                      </div>
+                    </Link>
+                  );
+                })}
+
+                <button
+                  onClick={() => setManageTeamsOpen((v) => !v)}
+                  className="flex items-center justify-between w-full px-3 py-2 mt-2 border-t border-slate-100 text-[10px] font-semibold text-slate-400 hover:text-slate-700 uppercase tracking-wider transition-colors"
+                >
+                  <span>Manage teams ({pods.length})</span>
+                  <ChevronDown size={12} className={`transition-transform ${manageTeamsOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {manageTeamsOpen && (<>
                 {pods.map((pod) => (
                   <div key={pod.id}>
                     {editingPodId === pod.id ? (
@@ -279,7 +327,7 @@ export default function Sidebar() {
                 ))}
                 {showForm ? (
                   <div className="mx-1 mt-1 p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
-                    <input type="text" placeholder="Pod name" value={podName} onChange={(e) => setPodName(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#6800FF]" />
+                    <input type="text" placeholder="Team name" value={podName} onChange={(e) => setPodName(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#6800FF]" />
 
                     {newPodMembers.length > 0 && (
                       <div className="flex flex-wrap gap-1">
@@ -345,15 +393,16 @@ export default function Sidebar() {
                     </div>
 
                     <div className="flex gap-2">
-                      <button onClick={handleAddPod} disabled={!podName.trim() || newPodMembers.length === 0} className="flex-1 py-1.5 bg-[#6800FF] hover:bg-[#5800DD] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-md transition-colors">Add pod</button>
+                      <button onClick={handleAddPod} disabled={!podName.trim() || newPodMembers.length === 0} className="flex-1 py-1.5 bg-[#6800FF] hover:bg-[#5800DD] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-md transition-colors">Add team</button>
                       <button onClick={() => { setShowForm(false); setPodName(""); setNewPodMembers([]); setNewPodSearch(""); }} className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm rounded-md transition-colors">Cancel</button>
                     </div>
                   </div>
                 ) : (
                   <button onClick={() => setShowForm(true)} className="flex items-center gap-2 w-full px-3 py-2 text-xs text-slate-400 hover:text-[#6800FF] hover:bg-slate-50 rounded-lg transition-colors">
-                    <Plus size={13} /> Add pod
+                    <Plus size={13} /> Add team
                   </button>
                 )}
+                </>)}
               </div>
             )}
           </div>
@@ -361,7 +410,7 @@ export default function Sidebar() {
 
         {!isAdmin && user?.podId && (
           <div className="p-3 pt-1">
-            <p className="px-3 py-1 text-xs font-semibold text-slate-400 uppercase tracking-wider">Your Pod</p>
+            <p className="px-3 py-1 text-xs font-semibold text-slate-400 uppercase tracking-wider">Your Team</p>
             {pods.filter((p) => p.id === user.podId).map((pod) => (
               <div key={pod.id} className="px-3 py-2 rounded-lg bg-slate-50 flex items-center gap-2.5 mt-1">
                 <div className={`w-2 h-2 rounded-full shrink-0 ${pod.color}`} />

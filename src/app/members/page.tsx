@@ -390,16 +390,15 @@ export default function MembersPage() {
               <th className="text-left px-3 py-2.5">Name</th>
               <th className="text-left px-3 py-2.5">Email</th>
               <th className="text-left px-3 py-2.5">Role</th>
-              <th className="text-left px-3 py-2.5">Pod</th>
               <th className="text-left px-3 py-2.5">Status</th>
               <th className="text-right px-3 py-2.5">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading && members.length === 0 ? (
-              <tr><td colSpan={6} className="text-center text-xs text-slate-500 py-8">Loading…</td></tr>
+              <tr><td colSpan={5} className="text-center text-xs text-slate-500 py-8">Loading…</td></tr>
             ) : visible.length === 0 ? (
-              <tr><td colSpan={6} className="text-center text-xs text-slate-500 py-8">No members found.</td></tr>
+              <tr><td colSpan={5} className="text-center text-xs text-slate-500 py-8">No members found.</td></tr>
             ) : visible.map((m) => {
               const pod = m.podId ? podMap[m.podId] : null;
               const isMe = m.email.toLowerCase() === (user?.email || "").toLowerCase();
@@ -437,26 +436,6 @@ export default function MembersPage() {
                         <option value="client">client</option>
                       </select>
                     )}
-                  </td>
-                  <td className="px-3 py-2">
-                    {m.role === "pod" && !isMe ? (
-                      <select
-                        value={m.podId || ""}
-                        onChange={(e) => changePod(m, e.target.value)}
-                        disabled={busyId === m.id}
-                        className="text-xs px-2 py-1 border border-slate-200 rounded bg-white focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10 disabled:opacity-50"
-                      >
-                        <option value="">— Unassigned —</option>
-                        {pods.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
-                    ) : pod ? (
-                      <span className="inline-flex items-center gap-1.5 text-xs">
-                        <span className={`w-2 h-2 rounded-full ${pod.color}`} />
-                        {pod.name}
-                      </span>
-                    ) : <span className="text-xs text-slate-400">—</span>}
                   </td>
                   <td className="px-3 py-2">
                     <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${

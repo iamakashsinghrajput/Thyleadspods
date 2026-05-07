@@ -18,6 +18,7 @@ import type { LucideIcon } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import type { PodInfo } from "@/lib/pod-context";
 import { useData, type ClientProject } from "@/lib/data-context";
+import { isInCurrentWeek } from "@/lib/week-range";
 import { useAuth } from "@/lib/auth-context";
 import { useNotifications } from "@/lib/notification-context";
 import { staticLogoForName, extractDomain, logoFromWebsite } from "@/lib/client-logo";
@@ -128,13 +129,13 @@ function PodDropdown({ value, onChange, pods, podMap, editable = true }: { value
 
 const columns = [
   { key: "client", label: "Client Name", short: "Client", breakpoint: 160, defaultWidth: 200, align: "left" as const },
-  { key: "pod", label: "Assigned Pod", short: "Pod", breakpoint: 140, defaultWidth: 150, align: "left" as const },
+  { key: "members", label: "Assigned Members", short: "Members", breakpoint: 160, defaultWidth: 240, align: "left" as const },
   { key: "monthlyExt", label: "Monthly Target (Ext)", short: "MT (Ext)", breakpoint: 150, defaultWidth: 170, align: "right" as const },
   { key: "weeklyExt", label: "Weekly Target (Ext)", short: "WT (Ext)", breakpoint: 150, defaultWidth: 160, align: "right" as const },
   { key: "monthlyInt", label: "Monthly Target (Int)", short: "MT (Int)", breakpoint: 150, defaultWidth: 170, align: "right" as const },
   { key: "completion", label: "Completion %", short: "Comp %", breakpoint: 140, defaultWidth: 200, align: "left" as const },
   { key: "achieved", label: "Target Achieved", short: "Achieved", breakpoint: 150, defaultWidth: 180, align: "right" as const },
-  { key: "health", label: "Health Status", short: "Health", breakpoint: 130, defaultWidth: 150, align: "center" as const },
+  { key: "health", label: "Health (this week)", short: "Health", breakpoint: 130, defaultWidth: 170, align: "center" as const },
 ];
 
 function EditableNameCell({ project, editable, onSave, href, remarkCount, staticLogoSrc }: { project: ClientProject; editable: boolean; onSave: (patch: Partial<ClientProject>) => void; href: string; remarkCount: number; staticLogoSrc: string | null }) {
@@ -238,6 +239,142 @@ function EditableNameCell({ project, editable, onSave, href, remarkCount, static
   );
 }
 
+function AssignedMembersCell({ members, editable, onSave }: { members: string[]; editable: boolean; onSave: (members: string[]) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<string[]>(members);
+  const [search, setSearch] = useState("");
+  const [users, setUsers] = useState<{ id: string; name: string; email: string; role: string }[]>([]);
+  const { user } = useAuth();
+
+  function open() {
+    setDraft(members);
+    setEditing(true);
+    setSearch("");
+  }
+  function commit() {
+    onSave(draft);
+    setEditing(false);
+  }
+  function cancel() {
+    setEditing(false);
+  }
+
+  useEffect(() => {
+    if (!editing || !user?.email) return;
+    if (user.role !== "admin" && user.role !== "superadmin") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/users?actor=${encodeURIComponent(user.email)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setUsers(data.users || []);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [editing, user?.email, user?.role]);
+
+  return (
+    <td className="px-6 py-4 overflow-hidden">
+      {members.length === 0 ? (
+        editable ? (
+          <button onClick={open} className="text-xs text-slate-400 hover:text-[#6800FF] inline-flex items-center gap-1 px-2 py-1 rounded border border-dashed border-slate-300 hover:border-[#6800FF]">
+            <Plus size={11} /> Assign
+          </button>
+        ) : <span className="text-xs text-slate-400">—</span>
+      ) : (
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {members.slice(0, 3).map((m) => (
+            <span key={m} className="inline-flex items-center px-2 py-0.5 bg-violet-50 border border-violet-200 text-violet-700 rounded-md text-[11px] font-semibold">{m}</span>
+          ))}
+          {members.length > 3 && (
+            <span className="text-[10px] text-slate-500 font-semibold">+{members.length - 3}</span>
+          )}
+          {editable && (
+            <button onClick={open} className="p-1 rounded text-slate-400 hover:text-[#6800FF] hover:bg-slate-100" title="Edit assigned members">
+              <Pencil size={11} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40" onClick={cancel}>
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-5 max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-slate-900 mb-1">Assign members</h3>
+            <p className="text-xs text-slate-500 mb-4">Pick the people who actually handle this client. They&apos;ll see it in their pod dashboard regardless of which pod they belong to.</p>
+
+            {draft.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-3">
+                {draft.map((m) => (
+                  <span key={m} className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-violet-50 border border-violet-200 rounded text-[11px] text-violet-700">
+                    {m}
+                    <button onClick={() => setDraft((prev) => prev.filter((x) => x !== m))} className="text-slate-400 hover:text-red-600">×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name or email…"
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10 mb-2"
+              autoFocus
+            />
+
+            <div className="border border-slate-200 rounded max-h-64 overflow-y-auto">
+              {(() => {
+                const q = search.trim().toLowerCase();
+                const candidates = users
+                  .filter((u) => ["pod", "admin", "superadmin"].includes(u.role))
+                  .filter((u) => !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+                if (candidates.length === 0) {
+                  return <div className="px-2 py-3 text-[11px] text-slate-400 text-center">{users.length === 0 ? "Loading users…" : "No matches"}</div>;
+                }
+                return candidates.map((u) => {
+                  const firstName = u.name.split(" ")[0];
+                  const isSelected = draft.some((m) => m.toLowerCase() === firstName.toLowerCase() || m.toLowerCase() === u.name.toLowerCase());
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => {
+                        if (isSelected) {
+                          setDraft((prev) => prev.filter((m) => m.toLowerCase() !== firstName.toLowerCase() && m.toLowerCase() !== u.name.toLowerCase()));
+                        } else {
+                          setDraft((prev) => [...prev, firstName]);
+                        }
+                      }}
+                      className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between gap-2 hover:bg-slate-50 transition-colors ${isSelected ? "bg-violet-50" : ""}`}
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium text-slate-900 truncate">{u.name}</p>
+                        <p className="text-[10px] text-slate-500 truncate font-mono">{u.email}</p>
+                      </div>
+                      {isSelected ? (
+                        <span className="text-[10px] font-semibold text-[#6800FF] shrink-0">Assigned ✓</span>
+                      ) : (
+                        <span className="text-[10px] font-semibold text-slate-400 shrink-0">+ Add</span>
+                      )}
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={cancel} className="px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-md">Cancel</button>
+              <button onClick={commit} className="px-3 py-1.5 text-sm font-medium bg-[#6800FF] hover:bg-[#5800DD] text-white rounded-md">Save ({draft.length})</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </td>
+  );
+}
+
 function EditableTargetCell({ value, editable, onSave }: { value: number; editable: boolean; onSave: (v: number) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
@@ -310,6 +447,24 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
     return projectStats[project.id]?.booked || 0;
   }
 
+  const weeklyDoneByProject = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const [projectId, list] of Object.entries(details)) {
+      let count = 0;
+      for (const d of list) {
+        if (d.meetingStatus === "done" && isInCurrentWeek(d.meetingDate)) count++;
+      }
+      out[projectId] = count;
+    }
+    return out;
+  }, [details]);
+
+  function getWeeklyTarget(project: ClientProject): number {
+    if (project.weeklyTargetExternal > 0) return project.weeklyTargetExternal;
+    if (project.monthlyTargetInternal > 0) return Math.ceil(project.monthlyTargetInternal / 4);
+    return 0;
+  }
+
   useEffect(() => {
     let ignore = false;
     (async () => {
@@ -326,7 +481,25 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
     })();
     return () => { ignore = true; };
   }, [projects]);
-  const [newClient, setNewClient] = useState({ clientName: "", assignedPod: "pod1", monthlyTargetExternal: "", weeklyTargetExternal: "", monthlyTargetInternal: "" });
+  const [newClient, setNewClient] = useState({ clientName: "", monthlyTargetExternal: "", weeklyTargetExternal: "", monthlyTargetInternal: "" });
+  const [newClientMembers, setNewClientMembers] = useState<string[]>([]);
+  const [memberPickerOpen, setMemberPickerOpen] = useState(false);
+  const [memberPickerSearch, setMemberPickerSearch] = useState("");
+  const [allUsersForForm, setAllUsersForForm] = useState<{ id: string; name: string; email: string; role: string }[]>([]);
+
+  useEffect(() => {
+    if (!showAddForm || !isAdmin || !user?.email) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/users?actor=${encodeURIComponent(user.email)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setAllUsersForForm(data.users || []);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [showAddForm, isAdmin, user?.email]);
   const [colWidths, setColWidths] = useState<number[]>(columns.map((c) => c.defaultWidth));
   const dragRef = useRef<{ colIndex: number; startX: number; startWidth: number } | null>(null);
 
@@ -364,8 +537,10 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
     const newPod = podMap[newPodId];
     updateProject(projectId, { assignedPod: newPodId });
     if (proj && newPod) {
-      addNotification(`Admin assigned "${proj.clientName}" to your pod`, "pod", newPodId);
-      addNotification(`"${proj.clientName}" reassigned to ${newPod.name}`, "admin");
+      const actorName = user?.name || user?.email?.split("@")[0] || "Someone";
+      const actorRoleLabel = user?.role === "superadmin" ? "Superadmin" : user?.role === "admin" ? "Admin" : "User";
+      addNotification(`${actorName} (${actorRoleLabel}) assigned "${proj.clientName}" to you`, "pod", newPodId);
+      addNotification(`${actorName} (${actorRoleLabel}) reassigned "${proj.clientName}" to ${newPod.name}`, "admin");
     }
   }
 
@@ -376,11 +551,24 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
   function handleAddClient() {
     if (!newClient.clientName.trim()) return;
     const nextNum = projects.length + 1;
+
+    const inferredPodIds = new Set<string>();
+    for (const m of newClientMembers) {
+      const lc = m.toLowerCase();
+      for (const pod of pods) {
+        if (pod.members.some((pm) => pm.toLowerCase() === lc || pm.split(" ")[0].toLowerCase() === lc)) {
+          inferredPodIds.add(pod.id);
+        }
+      }
+    }
+    const primaryPodId = inferredPodIds.size > 0 ? Array.from(inferredPodIds)[0] : "";
+
     const project: ClientProject = {
       id: `p${Date.now()}`,
       clientId: `CLT-${1000 + nextNum}`,
       clientName: newClient.clientName.trim(),
-      assignedPod: newClient.assignedPod,
+      assignedPod: primaryPodId,
+      assignedMembers: newClientMembers,
       monthlyTargetExternal: Number(newClient.monthlyTargetExternal) || 0,
       weeklyTargetExternal: Number(newClient.weeklyTargetExternal) || 0,
       monthlyTargetInternal: Number(newClient.monthlyTargetInternal) || 0,
@@ -389,23 +577,32 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
       meetingBooked: 0,
     };
     addProject(project);
-    const podName = podMap[project.assignedPod]?.name || project.assignedPod;
-    addNotification(`Admin assigned new client "${project.clientName}" to your pod`, "pod", project.assignedPod);
-    addNotification(`New client "${project.clientName}" assigned to ${podName}`, "admin");
-    setNewClient({ clientName: "", assignedPod: "pod1", monthlyTargetExternal: "", weeklyTargetExternal: "", monthlyTargetInternal: "" });
+
+    const actorName = user?.name || user?.email?.split("@")[0] || "Someone";
+    const actorRoleLabel = user?.role === "superadmin" ? "Superadmin" : user?.role === "admin" ? "Admin" : "User";
+    const memberLabel = newClientMembers.length > 0 ? newClientMembers.join(", ") : "the team";
+    for (const podId of inferredPodIds) {
+      addNotification(`${actorName} (${actorRoleLabel}) assigned a new client "${project.clientName}" to you`, "pod", podId);
+    }
+    addNotification(`${actorName} (${actorRoleLabel}) added "${project.clientName}" — assigned to ${memberLabel}`, "admin");
+
+    setNewClient({ clientName: "", monthlyTargetExternal: "", weeklyTargetExternal: "", monthlyTargetInternal: "" });
+    setNewClientMembers([]);
+    setMemberPickerSearch("");
+    setMemberPickerOpen(false);
     setShowAddForm(false);
   }
 
   function exportProjects() {
-    const headers = ["Client ID", "Client Name", "Pod", "Monthly Target (Ext)", "Weekly Target (Ext)", "Monthly Target (Int)", "Achieved", "Completion %", "Health"];
+    const headers = ["Client ID", "Client Name", "Members", "Monthly Target (Ext)", "Weekly Target (Ext)", "Monthly Target (Int)", "Achieved", "Completion %", "Health"];
     const rows = filteredProjects.map((p) => {
       const completed = getFilteredCompleted(p);
       const booked = getFilteredBooked(p);
       const achieved = completed + booked;
       const pct = p.monthlyTargetInternal > 0 ? Math.round((completed / p.monthlyTargetInternal) * 100) : 0;
       const health = pct >= 75 ? "On Track" : pct >= 50 ? "Needs Attention" : "At Risk";
-      const pod = podMap[p.assignedPod]?.name || p.assignedPod;
-      return [p.clientId, p.clientName, pod, String(p.monthlyTargetExternal), String(p.weeklyTargetExternal), String(p.monthlyTargetInternal), String(achieved), `${pct}%`, health];
+      const members = (p.assignedMembers || []).join(" · ");
+      return [p.clientId, p.clientName, members, String(p.monthlyTargetExternal), String(p.weeklyTargetExternal), String(p.monthlyTargetInternal), String(achieved), `${pct}%`, health];
     });
     const csv = [headers.join(","), ...rows.map((r) => r.map((v) => v.includes(",") ? `"${v}"` : v).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -461,15 +658,82 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
               onChange={(e) => setNewClient({ ...newClient, clientName: e.target.value })}
               className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]"
             />
-            <select
-              value={newClient.assignedPod}
-              onChange={(e) => setNewClient({ ...newClient, assignedPod: e.target.value })}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]"
-            >
-              {pods.map((pod) => (
-                <option key={pod.id} value={pod.id}>{pod.name}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMemberPickerOpen((v) => !v)}
+                className="w-full text-left px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white hover:border-[#6800FF] focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF] flex items-center justify-between gap-2"
+              >
+                <span className={newClientMembers.length === 0 ? "text-slate-400" : "text-slate-800"}>
+                  {newClientMembers.length === 0 ? "Assign members" : `${newClientMembers.length} member${newClientMembers.length === 1 ? "" : "s"}`}
+                </span>
+                <span className="text-slate-400 text-xs">▾</span>
+              </button>
+              {memberPickerOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setMemberPickerOpen(false)} />
+                  <div className="absolute z-50 mt-1 left-0 right-0 bg-white border border-slate-200 rounded-lg shadow-lg max-h-72 overflow-hidden flex flex-col">
+                    {newClientMembers.length > 0 && (
+                      <div className="px-2 py-1.5 border-b border-slate-100 flex flex-wrap gap-1">
+                        {newClientMembers.map((m) => (
+                          <span key={m} className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-violet-50 border border-violet-200 rounded text-[10px] text-violet-700">
+                            {m}
+                            <button type="button" onClick={() => setNewClientMembers((prev) => prev.filter((x) => x !== m))} className="text-slate-400 hover:text-red-600">×</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      type="text"
+                      autoFocus
+                      value={memberPickerSearch}
+                      onChange={(e) => setMemberPickerSearch(e.target.value)}
+                      placeholder="Search by name or email…"
+                      className="px-3 py-2 text-xs border-b border-slate-100 focus:outline-none"
+                    />
+                    <div className="overflow-y-auto flex-1">
+                      {(() => {
+                        const q = memberPickerSearch.trim().toLowerCase();
+                        const candidates = allUsersForForm
+                          .filter((u) => ["pod", "admin", "superadmin"].includes(u.role))
+                          .filter((u) => !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+                        if (candidates.length === 0) {
+                          return <div className="px-2 py-3 text-[11px] text-slate-400 text-center">{allUsersForForm.length === 0 ? "Loading users…" : "No matches"}</div>;
+                        }
+                        return candidates.map((u) => {
+                          const firstName = u.name.split(" ")[0];
+                          const isSelected = newClientMembers.some((m) => m.toLowerCase() === firstName.toLowerCase() || m.toLowerCase() === u.name.toLowerCase());
+                          return (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setNewClientMembers((prev) => prev.filter((m) => m.toLowerCase() !== firstName.toLowerCase() && m.toLowerCase() !== u.name.toLowerCase()));
+                                } else {
+                                  setNewClientMembers((prev) => [...prev, firstName]);
+                                }
+                              }}
+                              className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between gap-2 hover:bg-slate-50 transition-colors ${isSelected ? "bg-violet-50" : ""}`}
+                            >
+                              <div className="min-w-0">
+                                <p className="font-medium text-slate-900 truncate">{u.name}</p>
+                                <p className="text-[10px] text-slate-500 truncate font-mono">{u.email}</p>
+                              </div>
+                              {isSelected ? (
+                                <span className="text-[10px] font-semibold text-[#6800FF] shrink-0">Assigned ✓</span>
+                              ) : (
+                                <span className="text-[10px] font-semibold text-slate-400 shrink-0">+ Add</span>
+                              )}
+                            </button>
+                          );
+                        });
+                      })()}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
             <input
               type="number"
               placeholder="Monthly Target (Ext)"
@@ -530,7 +794,10 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
                   const completed = getFilteredCompleted(project);
                   const booked = getFilteredBooked(project);
                   const percent = project.monthlyTargetInternal === 0 ? 0 : Math.round((completed / project.monthlyTargetInternal) * 100);
-                  const health = getHealthStatus(percent);
+                  const weeklyDone = weeklyDoneByProject[project.id] || 0;
+                  const weeklyTarget = getWeeklyTarget(project);
+                  const weeklyPct = weeklyTarget === 0 ? 0 : Math.round((weeklyDone / weeklyTarget) * 100);
+                  const health = getHealthStatus(weeklyPct);
                   const hc = healthConfig[health];
                   const StatusIcon = hc.icon;
                   return (
@@ -547,15 +814,11 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
                         staticLogoSrc={staticLogoForName(project.clientName)}
                       />
 
-                      <td className="px-6 py-4 overflow-hidden">
-                        <PodDropdown
-                          value={project.assignedPod}
-                          onChange={(newPod) => handlePodChange(project.id, newPod)}
-                          pods={pods}
-                          podMap={podMap}
-                          editable={isAdmin}
-                        />
-                      </td>
+                      <AssignedMembersCell
+                        members={project.assignedMembers || []}
+                        editable={isAdmin}
+                        onSave={(members) => updateProject(project.id, { assignedMembers: members })}
+                      />
 
                       <EditableTargetCell value={project.monthlyTargetExternal} editable={isAdmin} onSave={(v) => updateProject(project.id, { monthlyTargetExternal: v })} />
                       <EditableTargetCell value={project.weeklyTargetExternal} editable={isAdmin} onSave={(v) => updateProject(project.id, { weeklyTargetExternal: v })} />
@@ -586,9 +849,12 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
 
                       <td className="px-6 py-4 overflow-hidden">
                         <div className="flex justify-center">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border whitespace-nowrap ${hc.bg} ${hc.text} ${hc.border}`}>
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border whitespace-nowrap ${hc.bg} ${hc.text} ${hc.border}`}
+                            title={weeklyTarget === 0 ? "No weekly target set" : `${weeklyDone} of ${weeklyTarget} this week (${weeklyPct}%)`}
+                          >
                             <StatusIcon size={14} className={`shrink-0 ${hc.iconColor}`} />
-                            <span className="truncate">{hc.label}</span>
+                            <span className="truncate">{hc.label} · {weeklyDone}/{weeklyTarget || "?"}</span>
                           </span>
                         </div>
                       </td>

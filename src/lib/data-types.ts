@@ -11,4 +11,5 @@ export interface ClientProject {
   meetingBooked: number;
   websiteUrl?: string;
   logoUrl?: string;
+  assignedMembers?: string[];
 }

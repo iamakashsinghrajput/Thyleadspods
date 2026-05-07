@@ -154,10 +154,29 @@ export default function Signature() {
   const [shareEmails, setShareEmails] = useState<string[]>([]);
   const [emailDraft, setEmailDraft] = useState("");
 
-  const availableTargets = useMemo(
-    () => SEED_USERS.filter((u) => u.role === "admin" || u.role === "pod"),
-    []
-  );
+  const [liveUsers, setLiveUsers] = useState<{ name: string; email: string; role: string; podId?: string }[]>([]);
+
+  useEffect(() => {
+    if (!user?.email) return;
+    if (user.role !== "admin" && user.role !== "superadmin") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/users?actor=${encodeURIComponent(user.email)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setLiveUsers(data.users || []);
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [user?.email, user?.role]);
+
+  const availableTargets = useMemo(() => {
+    if (liveUsers.length > 0) {
+      return liveUsers.filter((u) => u.role === "admin" || u.role === "pod" || u.role === "superadmin");
+    }
+    return SEED_USERS.filter((u) => u.role === "admin" || u.role === "pod");
+  }, [liveUsers]);
 
   const fetchSignatures = useCallback(async () => {
     if (!user) return;

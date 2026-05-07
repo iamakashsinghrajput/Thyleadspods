@@ -23,18 +23,18 @@ export default function NotificationFlash() {
       {flashes.map((f) => (
         <div
           key={f.id}
-          className="pointer-events-auto bg-linear-to-br from-[#6800FF] to-[#9B4DFF] text-white rounded-2xl shadow-2xl ring-4 ring-[#6800FF]/20 px-4 py-3 flex items-start gap-3 animate-flash-slide overflow-hidden"
+          className="pointer-events-auto bg-white rounded-2xl shadow-lg ring-1 ring-slate-200/80 border border-slate-100 px-4 py-3 flex items-start gap-3 animate-flash-slide overflow-hidden"
         >
-          <div className="shrink-0 mt-0.5 p-1.5 bg-white/15 rounded-lg">
-            <Bell size={14} className="text-white" />
+          <div className="shrink-0 mt-0.5 p-1.5 bg-violet-50 rounded-lg border border-violet-100">
+            <Bell size={14} className="text-[#6800FF]" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wider opacity-80">New notification</p>
-            <p className="text-sm font-semibold leading-snug mt-0.5 break-words">{f.message}</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[#6800FF]">New notification</p>
+            <p className="text-sm font-semibold leading-snug mt-0.5 text-slate-800 break-words">{f.message}</p>
           </div>
           <button
             onClick={() => dismissFlash(f.id)}
-            className="shrink-0 p-1 rounded hover:bg-white/15 transition-colors text-white/80 hover:text-white"
+            className="shrink-0 p-1 rounded hover:bg-slate-100 transition-colors text-slate-400 hover:text-slate-700"
             aria-label="Dismiss"
           >
             <X size={13} />

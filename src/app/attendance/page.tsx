@@ -647,7 +647,7 @@ export default function AttendancePage() {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-[#6800FF] hover:bg-[#5800DD] text-white transition-colors shadow-sm"
           >
             <Users size={14} />
-            {podViewMode ? "Back to My Attendance" : "View Pod Attendance"}
+            {podViewMode ? "Back to My Attendance" : "View Member Attendance"}
           </button>
         </div>
       )}
@@ -733,7 +733,7 @@ export default function AttendancePage() {
                     className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
                   >
                     <ArrowRight size={14} className="rotate-180" />
-                    <span>Pod Attendance</span>
+                    <span>Member Attendance</span>
                     <ChevronRight size={14} className="text-slate-300" />
                     <span className="text-slate-900 font-semibold">{selectedMember.userName}</span>
                   </button>
@@ -1263,7 +1263,7 @@ export default function AttendancePage() {
                 <>
                   <div className="flex items-start justify-between gap-3 mb-5 flex-wrap">
                     <div>
-                      <h2 className="text-xl font-bold text-slate-900">Pod Attendance</h2>
+                      <h2 className="text-xl font-bold text-slate-900">Member Attendance</h2>
                       <p className="text-xs text-slate-500 mt-0.5">{pretty} · {rows.length} member{rows.length === 1 ? "" : "s"}</p>
                     </div>
                     <div className="flex items-center gap-2">
