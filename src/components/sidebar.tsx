@@ -40,9 +40,16 @@ export default function Sidebar() {
   const isAdmin = user?.role === "admin" || user?.role === "superadmin";
   const isSuperadmin = user?.role === "superadmin";
   const [pendingCount, setPendingCount] = useState(0);
+  const { collapsed, toggle } = useSidebar();
+  const [podsOpen, setPodsOpen] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [podName, setPodName] = useState("");
+  const [newPodMembers, setNewPodMembers] = useState<string[]>([]);
+  const [newPodSearch, setNewPodSearch] = useState("");
 
   useEffect(() => {
     if (!isAdmin || !user?.email) { setAllUsers([]); return; }
+    if (!editingPodId && !showForm) return;
     let cancelled = false;
     (async () => {
       try {
@@ -53,7 +60,7 @@ export default function Sidebar() {
       } catch {}
     })();
     return () => { cancelled = true; };
-  }, [isAdmin, user?.email, editingPodId]);
+  }, [isAdmin, user?.email, editingPodId, showForm]);
 
   useEffect(() => {
     if (!isSuperadmin || !user?.email) { setPendingCount(0); return; }
@@ -70,19 +77,14 @@ export default function Sidebar() {
     const t = setInterval(refresh, 60_000);
     return () => { cancelled = true; clearInterval(t); };
   }, [isSuperadmin, user?.email]);
-  const { collapsed, toggle } = useSidebar();
-  const [podsOpen, setPodsOpen] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-  const [podName, setPodName] = useState("");
-  const [podMembers, setPodMembers] = useState("");
 
   function handleAddPod() {
     const name = podName.trim();
-    const members = podMembers.split(",").map((m) => m.trim()).filter(Boolean);
-    if (!name || members.length === 0) return;
-    addPod(name, members);
+    if (!name || newPodMembers.length === 0) return;
+    addPod(name, newPodMembers);
     setPodName("");
-    setPodMembers("");
+    setNewPodMembers([]);
+    setNewPodSearch("");
     setShowForm(false);
   }
 
@@ -278,10 +280,73 @@ export default function Sidebar() {
                 {showForm ? (
                   <div className="mx-1 mt-1 p-3 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
                     <input type="text" placeholder="Pod name" value={podName} onChange={(e) => setPodName(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#6800FF]" />
-                    <input type="text" placeholder="Members (comma separated)" value={podMembers} onChange={(e) => setPodMembers(e.target.value)} className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#6800FF]" />
+
+                    {newPodMembers.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {newPodMembers.map((mn) => (
+                          <span key={mn} className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[11px] text-slate-700">
+                            {mn}
+                            <button
+                              onClick={() => setNewPodMembers((prev) => prev.filter((x) => x !== mn))}
+                              className="text-slate-400 hover:text-red-600"
+                              title={`Remove ${mn}`}
+                            >×</button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    <input
+                      type="text"
+                      value={newPodSearch}
+                      onChange={(e) => setNewPodSearch(e.target.value)}
+                      placeholder="Search members by name or email…"
+                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-md text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#6800FF]"
+                    />
+
+                    <div className="max-h-48 overflow-y-auto border border-slate-200 rounded bg-white">
+                      {(() => {
+                        const q = newPodSearch.trim().toLowerCase();
+                        const candidates = allUsers
+                          .filter((u) => ["pod", "admin", "superadmin"].includes(u.role))
+                          .filter((u) => !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+                        if (candidates.length === 0) {
+                          return <div className="px-2 py-3 text-[11px] text-slate-400 text-center">{allUsers.length === 0 ? "Loading users…" : "No matches"}</div>;
+                        }
+                        return candidates.map((u) => {
+                          const firstName = u.name.split(" ")[0];
+                          const isSelected = newPodMembers.some((m) => m.toLowerCase() === firstName.toLowerCase() || m.toLowerCase() === u.name.toLowerCase());
+                          return (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setNewPodMembers((prev) => prev.filter((m) => m.toLowerCase() !== firstName.toLowerCase() && m.toLowerCase() !== u.name.toLowerCase()));
+                                } else {
+                                  setNewPodMembers((prev) => [...prev, firstName]);
+                                }
+                              }}
+                              className={`w-full text-left px-2 py-1.5 text-xs flex items-center justify-between gap-2 hover:bg-slate-50 transition-colors ${isSelected ? "bg-violet-50" : ""}`}
+                            >
+                              <div className="min-w-0">
+                                <p className="font-medium text-slate-900 truncate">{u.name}</p>
+                                <p className="text-[10px] text-slate-500 truncate font-mono">{u.email}</p>
+                              </div>
+                              {isSelected ? (
+                                <span className="text-[10px] font-semibold text-[#6800FF] shrink-0">Selected ✓</span>
+                              ) : (
+                                <span className="text-[10px] font-semibold text-slate-400 shrink-0">+ Add</span>
+                              )}
+                            </button>
+                          );
+                        });
+                      })()}
+                    </div>
+
                     <div className="flex gap-2">
-                      <button onClick={handleAddPod} className="flex-1 py-1.5 bg-[#6800FF] hover:bg-[#5800DD] text-white text-sm font-medium rounded-md transition-colors">Add</button>
-                      <button onClick={() => { setShowForm(false); setPodName(""); setPodMembers(""); }} className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm rounded-md transition-colors">Cancel</button>
+                      <button onClick={handleAddPod} disabled={!podName.trim() || newPodMembers.length === 0} className="flex-1 py-1.5 bg-[#6800FF] hover:bg-[#5800DD] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-md transition-colors">Add pod</button>
+                      <button onClick={() => { setShowForm(false); setPodName(""); setNewPodMembers([]); setNewPodSearch(""); }} className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm rounded-md transition-colors">Cancel</button>
                     </div>
                   </div>
                 ) : (

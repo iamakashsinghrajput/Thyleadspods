@@ -185,6 +185,54 @@ export default function MembersPage() {
     setConfirmDeleteId("");
   }
 
+  async function changeRole(member: MemberRow, newRole: string) {
+    if (!user?.email) return;
+    setBusyId(member.id);
+    setErr("");
+    try {
+      const body: Record<string, unknown> = { actor: user.email, id: member.id, role: newRole };
+      if (newRole !== "pod") body.podId = "";
+      const res = await fetch(`/api/users`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { setErr(data.error || "Failed to change role"); setBusyId(""); return; }
+      setMembers((prev) => prev.map((m) => m.id === member.id ? { ...m, role: newRole, podId: newRole === "pod" ? m.podId : "" } : m));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Network error");
+    }
+    setBusyId("");
+  }
+
+  async function changePod(member: MemberRow, newPodId: string) {
+    if (!user?.email) return;
+    setBusyId(member.id);
+    setErr("");
+    try {
+      const res = await fetch(`/api/users`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor: user.email, id: member.id, podId: newPodId }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setErr(data.error || "Failed to change pod"); setBusyId(""); return; }
+      stripFromPodLocal(member);
+      const targetPod = pods.find((p) => p.id === newPodId);
+      if (targetPod && member.name) {
+        const firstName = member.name.split(" ")[0];
+        if (!targetPod.members.some((m) => m.toLowerCase() === firstName.toLowerCase())) {
+          updatePodMembers(targetPod.id, [...targetPod.members, firstName]);
+        }
+      }
+      setMembers((prev) => prev.map((m) => m.id === member.id ? { ...m, podId: newPodId } : m));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Network error");
+    }
+    setBusyId("");
+  }
+
   if (!hydrated) return <div className="p-6 text-sm text-slate-500">Loading…</div>;
   if (!isSuperadmin) {
     return (
@@ -364,15 +412,46 @@ export default function MembersPage() {
                   </td>
                   <td className="px-3 py-2 text-slate-600 font-mono text-xs">{m.email}</td>
                   <td className="px-3 py-2">
-                    <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                      m.role === "superadmin" ? "bg-[#f0e6ff] text-[#6800FF]" :
-                      m.role === "admin" ? "bg-amber-50 text-amber-700" :
-                      m.role === "client" ? "bg-sky-50 text-sky-700" :
-                      "bg-slate-100 text-slate-600"
-                    }`}>{m.role}</span>
+                    {isMe ? (
+                      <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                        m.role === "superadmin" ? "bg-[#f0e6ff] text-[#6800FF]" :
+                        m.role === "admin" ? "bg-amber-50 text-amber-700" :
+                        m.role === "client" ? "bg-sky-50 text-sky-700" :
+                        "bg-slate-100 text-slate-600"
+                      }`}>{m.role}</span>
+                    ) : (
+                      <select
+                        value={m.role}
+                        onChange={(e) => changeRole(m, e.target.value)}
+                        disabled={busyId === m.id}
+                        className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 disabled:opacity-50 ${
+                          m.role === "superadmin" ? "bg-[#f0e6ff] text-[#6800FF]" :
+                          m.role === "admin" ? "bg-amber-50 text-amber-700" :
+                          m.role === "client" ? "bg-sky-50 text-sky-700" :
+                          "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        <option value="superadmin">superadmin</option>
+                        <option value="admin">admin</option>
+                        <option value="pod">pod</option>
+                        <option value="client">client</option>
+                      </select>
+                    )}
                   </td>
                   <td className="px-3 py-2">
-                    {pod ? (
+                    {m.role === "pod" && !isMe ? (
+                      <select
+                        value={m.podId || ""}
+                        onChange={(e) => changePod(m, e.target.value)}
+                        disabled={busyId === m.id}
+                        className="text-xs px-2 py-1 border border-slate-200 rounded bg-white focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10 disabled:opacity-50"
+                      >
+                        <option value="">— Unassigned —</option>
+                        {pods.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    ) : pod ? (
                       <span className="inline-flex items-center gap-1.5 text-xs">
                         <span className={`w-2 h-2 rounded-full ${pod.color}`} />
                         {pod.name}
