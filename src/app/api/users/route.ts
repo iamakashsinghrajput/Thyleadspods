@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import UserModel from "@/lib/models/user";
+import DeletedSeedEmail from "@/lib/models/deleted-seed-email";
 import { SUPERADMIN_EMAIL } from "@/lib/user-approval";
+import { SEED_USERS } from "@/lib/seed-users";
 
 function isSuperadmin(email: string): boolean {
   return (email || "").toLowerCase() === SUPERADMIN_EMAIL;
@@ -53,6 +55,17 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Cannot delete the superadmin account" }, { status: 400 });
   }
   await UserModel.findByIdAndDelete(id);
+
+  const targetEmail = (target.email || "").toLowerCase();
+  const isSeedUser = SEED_USERS.some((u) => u.email.toLowerCase() === targetEmail);
+  if (isSeedUser && targetEmail) {
+    await DeletedSeedEmail.updateOne(
+      { email: targetEmail },
+      { $set: { email: targetEmail, deletedAt: new Date(), deletedBy: actor.toLowerCase() } },
+      { upsert: true },
+    );
+  }
+
   return NextResponse.json({ ok: true, deletedEmail: target.email || "" });
 }
 

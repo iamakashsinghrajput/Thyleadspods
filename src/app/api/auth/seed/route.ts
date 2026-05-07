@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/mongodb";
 import UserModel from "@/lib/models/user";
+import DeletedSeedEmail from "@/lib/models/deleted-seed-email";
 import bcrypt from "bcryptjs";
 import { SEED_USERS, reconcileRoleFromSeed } from "@/lib/seed-users";
 
@@ -9,10 +10,18 @@ export async function POST() {
   let created = 0;
   let reconciled = 0;
   let skipped = 0;
+  let tombstoned = 0;
 
   let passwordsInstalled = 0;
 
+  const tombstoneDocs = await DeletedSeedEmail.find({}).select("email").lean<{ email: string }[]>();
+  const tombstones = new Set(tombstoneDocs.map((d) => (d.email || "").toLowerCase()));
+
   for (const u of SEED_USERS) {
+    if (tombstones.has(u.email.toLowerCase())) {
+      tombstoned++;
+      continue;
+    }
     const exists = await UserModel.findOne({ email: u.email });
     if (exists) {
       const didReconcile = await reconcileRoleFromSeed(exists);
@@ -40,5 +49,5 @@ export async function POST() {
     created++;
   }
 
-  return NextResponse.json({ created, reconciled, skipped, passwordsInstalled });
+  return NextResponse.json({ created, reconciled, skipped, passwordsInstalled, tombstoned });
 }
