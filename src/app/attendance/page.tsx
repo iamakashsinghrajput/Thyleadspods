@@ -1163,30 +1163,44 @@ export default function AttendancePage() {
               const rows: Row[] = [];
               const seenNames = new Set<string>();
 
-              // 1. Pod members first.
+              // 1. Pod members — DEDUPED by user (same person in 2 pods = 1 row).
+              const memberToPods = new Map<string, { name: string; pods: { id: string; name: string; color: string }[] }>();
               for (const pod of pods) {
                 for (const member of pod.members) {
-                  const rec = podAttendanceRecords.find((r) => firstToken(r.userName) === firstToken(member));
-                  const isWfh = !!(rec && rec.isWfh);
-                  const status: Row["status"] = isWfh
-                    ? "wfh"
-                    : rec?.status === "present" ? "present"
-                    : rec?.status === "half-day" ? "half-day"
-                    : rec?.status === "leave" ? "leave"
-                    : "absent";
-                  rows.push({
-                    key: `${pod.id}:${member}`,
-                    userName: rec?.userName || member,
-                    userId: rec?.userId || getUserId(member),
-                    podId: pod.id,
-                    podName: pod.name,
-                    podColor: pod.color,
-                    roleLabel: pod.name,
-                    rec,
-                    status,
-                  });
-                  seenNames.add(firstToken(member));
+                  const key = firstToken(member);
+                  if (!key) continue;
+                  const existing = memberToPods.get(key);
+                  if (existing) {
+                    if (!existing.pods.some((p) => p.id === pod.id)) {
+                      existing.pods.push({ id: pod.id, name: pod.name, color: pod.color });
+                    }
+                  } else {
+                    memberToPods.set(key, { name: member, pods: [{ id: pod.id, name: pod.name, color: pod.color }] });
+                  }
                 }
+              }
+              for (const [key, info] of memberToPods.entries()) {
+                const rec = podAttendanceRecords.find((r) => firstToken(r.userName) === key);
+                const isWfh = !!(rec && rec.isWfh);
+                const status: Row["status"] = isWfh
+                  ? "wfh"
+                  : rec?.status === "present" ? "present"
+                  : rec?.status === "half-day" ? "half-day"
+                  : rec?.status === "leave" ? "leave"
+                  : "absent";
+                const podsLabel = info.pods.map((p) => p.name).join(" · ");
+                rows.push({
+                  key: `user:${key}`,
+                  userName: rec?.userName || info.name,
+                  userId: rec?.userId || getUserId(info.name),
+                  podId: info.pods[0].id,
+                  podName: podsLabel,
+                  podColor: info.pods[0].color,
+                  roleLabel: podsLabel,
+                  rec,
+                  status,
+                });
+                seenNames.add(key);
               }
 
               // 2. Admins + superadmin from the seed roster (so they show as cards too).

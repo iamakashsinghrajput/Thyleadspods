@@ -2,7 +2,7 @@
 
 import { use, useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Search, X, Upload, Pickaxe, Plus, Pencil, Check, Download } from "lucide-react";
+import { ArrowLeft, Search, X, Upload, Pickaxe, Plus, Pencil, Check, Download, CheckCircle2, CalendarClock, Clock, BarChart3 } from "lucide-react";
 import { useData } from "@/lib/data-context";
 import { useAuth } from "@/lib/auth-context";
 import { useNotifications } from "@/lib/notification-context";
@@ -109,6 +109,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [popupAdditionalInfo, setPopupAdditionalInfo] = useState("");
   const [popupSummary, setPopupSummary] = useState("");
   const [clientRemarks, setClientRemarks] = useState<Record<string, { remark: string; updatedAt: string; updatedBy: string }>>({});
+  const [celebration, setCelebration] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -178,6 +179,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       companyName: detailForm.companyName, contactName: detailForm.contactName, contactTitle: detailForm.contactTitle,
       contactEmail: detailForm.contactEmail, contactNumber: detailForm.contactNumber,
     };
+    const wasNew = !editingDetailId;
     if (editingDetailId) {
       updateDetail(id, editingDetailId, payload);
     } else {
@@ -187,6 +189,23 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       addDetail(id, { id: newId, meetingId, ...payload, accountManager: "", remarks: "", additionalInfo: "", meetingSummary: "" });
     }
     resetDetailForm();
+    if (wasNew && payload.meetingStatus === "done" && isPod) {
+      const target = project?.monthlyTargetInternal || 0;
+      const newDoneCount = monthCounts.done + 1;
+      const remaining = Math.max(0, target - newDoneCount);
+      let message: string;
+      if (target === 0) {
+        message = `${newDoneCount} done — keep going!`;
+      } else if (remaining === 0) {
+        message = `${newDoneCount} done · target hit! 🏆`;
+      } else if (remaining === 1) {
+        message = `${newDoneCount} done · just 1 more to go!`;
+      } else {
+        message = `${newDoneCount} done · ${remaining} more to go, keep it up!`;
+      }
+      setCelebration(message);
+      setTimeout(() => setCelebration(null), 3500);
+    }
   }
 
   function startEditDetail(d: ClientDetail) {
@@ -280,6 +299,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="min-h-full">
+      {celebration && <ConfettiCelebration message={celebration} onClose={() => setCelebration(null)} />}
       <div className="px-8 pt-8 pb-4">
         <button onClick={() => router.push("/")} className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-[#6800FF] transition-colors mb-4">
           <ArrowLeft size={14} />
@@ -299,23 +319,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-baseline gap-3 flex-wrap">
               <h2 className="text-base font-semibold text-slate-800">Meeting Details</h2>
-              <div className="flex items-center gap-1.5 text-[11px]">
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-700 font-semibold tabular-nums" title={monthFilter ? `Done in ${monthFilter}` : "Done across all months"}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  {monthCounts.done} done
-                </span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 border border-sky-200 text-sky-700 font-semibold tabular-nums" title={monthFilter ? `Scheduled in ${monthFilter}` : "Scheduled across all months"}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
-                  {monthCounts.scheduled} scheduled
-                </span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-700 font-semibold tabular-nums" title={monthFilter ? `Pipeline in ${monthFilter}` : "Pipeline across all months"}>
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                  {monthCounts.pipeline} pipeline
-                </span>
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700 font-semibold tabular-nums">
-                  {monthCounts.total} total · {monthFilter || "all months"}
-                </span>
-              </div>
             </div>
             <div className="flex items-center gap-2">
               <select
@@ -356,6 +359,58 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               )}
             </div>
           </div>
+
+          {(() => {
+            const target = project?.monthlyTargetInternal || 0;
+            const remaining = Math.max(0, target - monthCounts.done);
+            const targetPct = target > 0 ? Math.min(100, Math.round((monthCounts.done / target) * 100)) : 0;
+            const doneFooter = target === 0
+              ? "no target set"
+              : remaining === 0
+                ? "🏆 target hit!"
+                : `${remaining} more to go`;
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                <MeetingStatCard
+                  label="Done"
+                  value={monthCounts.done}
+                  pct={targetPct}
+                  pctLabel={target > 0 ? `${targetPct}% of ${target}` : ""}
+                  footerOverride={doneFooter}
+                  scope={monthFilter || "all months"}
+                  icon={CheckCircle2}
+                  accent="emerald"
+                />
+                <MeetingStatCard
+                  label="Scheduled"
+                  value={monthCounts.scheduled}
+                  pct={0}
+                  footerOverride="coming up next"
+                  scope={monthFilter || "all months"}
+                  icon={CalendarClock}
+                  accent="sky"
+                />
+                <MeetingStatCard
+                  label="Pipeline"
+                  value={monthCounts.pipeline}
+                  pct={0}
+                  footerOverride="in pipeline"
+                  scope={monthFilter || "all months"}
+                  icon={Clock}
+                  accent="amber"
+                />
+                <MeetingStatCard
+                  label="Total"
+                  value={monthCounts.total}
+                  pct={100}
+                  scope={monthFilter || "all months"}
+                  icon={BarChart3}
+                  accent="violet"
+                  isTotal
+                />
+              </div>
+            );
+          })()}
 
           {showDetailForm && isPod && (
             <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-5 mb-3 space-y-3">
@@ -722,5 +777,101 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         </>
       )}
     </div>
+  );
+}
+
+const ACCENT_STYLES: Record<string, { bgFrom: string; bgTo: string; border: string; iconBg: string; iconColor: string; bar: string; ring: string; label: string }> = {
+  emerald: { bgFrom: "from-emerald-50/80",  bgTo: "to-white", border: "border-emerald-200/70", iconBg: "bg-emerald-100", iconColor: "text-emerald-600", bar: "bg-emerald-500",  ring: "ring-emerald-100", label: "text-emerald-700" },
+  sky:     { bgFrom: "from-sky-50/80",       bgTo: "to-white", border: "border-sky-200/70",     iconBg: "bg-sky-100",     iconColor: "text-sky-600",     bar: "bg-sky-500",      ring: "ring-sky-100",     label: "text-sky-700" },
+  amber:   { bgFrom: "from-amber-50/80",     bgTo: "to-white", border: "border-amber-200/70",   iconBg: "bg-amber-100",   iconColor: "text-amber-600",   bar: "bg-amber-500",    ring: "ring-amber-100",   label: "text-amber-700" },
+  violet:  { bgFrom: "from-[#6800FF]/8",     bgTo: "to-white", border: "border-[#6800FF]/30",   iconBg: "bg-[#f0e6ff]",   iconColor: "text-[#6800FF]",   bar: "bg-[#6800FF]",    ring: "ring-[#6800FF]/10",  label: "text-[#6800FF]" },
+};
+
+function MeetingStatCard({ label, value, pct, pctLabel, footerOverride, scope, icon: Icon, accent, isTotal = false }: { label: string; value: number; pct: number; pctLabel?: string; footerOverride?: string; scope: string; icon: React.ComponentType<{ size?: number; className?: string }>; accent: "emerald" | "sky" | "amber" | "violet"; isTotal?: boolean }) {
+  const a = ACCENT_STYLES[accent];
+  const showProgressBar = !isTotal && pct > 0;
+  return (
+    <div className={`group relative bg-linear-to-br ${a.bgFrom} ${a.bgTo} border ${a.border} rounded-2xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all ring-1 ${a.ring} overflow-hidden`}>
+      <div className="flex items-start justify-between mb-2">
+        <p className={`text-[10px] font-bold uppercase tracking-wider ${a.label}`}>{label}</p>
+        <div className={`p-2 rounded-xl ${a.iconBg} ${a.iconColor} shrink-0`}>
+          <Icon size={16} />
+        </div>
+      </div>
+      <p className="text-3xl font-bold text-slate-900 tabular-nums tracking-tight leading-none">{value.toLocaleString()}</p>
+      <div className={`mt-2 inline-flex items-center px-2 py-0.5 rounded-md ${a.iconBg} ${a.label} text-[10px] font-semibold`}>
+        {footerOverride || scope}
+      </div>
+      {pctLabel && (
+        <p className="text-[10px] text-slate-400 mt-1.5 tabular-nums">{pctLabel}</p>
+      )}
+      <p className="text-[10px] text-slate-400 mt-1">in {scope}</p>
+      {showProgressBar && (
+        <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+          <div className={`h-full ${a.bar} transition-all duration-700`} style={{ width: `${Math.min(pct, 100)}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConfettiCelebration({ message, onClose }: { message: string; onClose: () => void }) {
+  const pieces = Array.from({ length: 60 });
+  return (
+    <>
+      <div className="fixed inset-0 z-[100] pointer-events-none overflow-hidden">
+        {pieces.map((_, i) => {
+          const left = Math.random() * 100;
+          const delay = Math.random() * 0.4;
+          const duration = 1.5 + Math.random() * 1.2;
+          const colors = ["#6800FF", "#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#FF8FAB", "#FFA94D"];
+          const color = colors[i % colors.length];
+          const rotate = Math.random() * 720 - 360;
+          const drift = (Math.random() - 0.5) * 200;
+          const size = 8 + Math.random() * 8;
+          const isCircle = Math.random() > 0.5;
+          return (
+            <span
+              key={i}
+              className="absolute top-0 will-change-transform"
+              style={{
+                left: `${left}%`,
+                width: `${size}px`,
+                height: `${size}px`,
+                background: color,
+                borderRadius: isCircle ? "50%" : "2px",
+                animation: `confetti-fall ${duration}s ease-out ${delay}s forwards`,
+                ["--drift" as string]: `${drift}px`,
+                ["--rotate" as string]: `${rotate}deg`,
+              } as React.CSSProperties}
+            />
+          );
+        })}
+      </div>
+      <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[101] pointer-events-auto">
+        <div onClick={onClose} className="cursor-pointer flex items-center gap-3 px-5 py-3 bg-linear-to-br from-[#6800FF] to-[#9B4DFF] text-white rounded-2xl shadow-2xl animate-celebration-pop ring-4 ring-[#6800FF]/20">
+          <span className="text-2xl">🎉</span>
+          <div className="text-left">
+            <p className="text-xs font-bold uppercase tracking-wider opacity-80">Congrats!</p>
+            <p className="text-sm font-bold">{message}</p>
+          </div>
+        </div>
+      </div>
+      <style jsx global>{`
+        @keyframes confetti-fall {
+          0% { transform: translate3d(0, -10vh, 0) rotate(0deg); opacity: 1; }
+          100% { transform: translate3d(var(--drift), 110vh, 0) rotate(var(--rotate)); opacity: 0; }
+        }
+        @keyframes celebration-pop {
+          0% { transform: translateY(-30px) scale(0.6); opacity: 0; }
+          50% { transform: translateY(8px) scale(1.05); opacity: 1; }
+          70% { transform: translateY(-2px) scale(0.98); }
+          100% { transform: translateY(0) scale(1); opacity: 1; }
+        }
+        .animate-celebration-pop {
+          animation: celebration-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+      `}</style>
+    </>
   );
 }
