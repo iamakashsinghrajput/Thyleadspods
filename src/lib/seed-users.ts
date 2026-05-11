@@ -15,13 +15,13 @@ export const SEED_USERS: SeedUser[] = [
   { name: "Bharath", email: "bharath@thyleads.com", password: "admin123", role: "admin", approverId: "sales" },
   { name: "Rahul Dev", email: "sales@thyleads.com", password: "admin123", role: "admin", approverId: "" },
   { name: "Kunal", email: "kunal@thyleads.com", password: "pod123", role: "pod", podId: "pod1", approverId: "bharath" },
-  { name: "Rajesh", email: "rajesh@thyleads.com", password: "pod123", role: "pod", podId: "pod1", approverId: "bharath" },
+  { name: "Shruti", email: "shruti@thyleads.com", password: "pod123", role: "pod", podId: "pod1", approverId: "bharath" },
   { name: "Manshi", email: "manshi@thyleads.com", password: "pod123", role: "pod", podId: "pod2", approverId: "bharath" },
   { name: "Naman", email: "naman@thyleads.com", password: "pod123", role: "pod", podId: "pod2", approverId: "bharath" },
   { name: "Krishna", email: "krishna@thyleads.com", password: "pod123", role: "pod", podId: "pod3", approverId: "bharath" },
   { name: "Mridul", email: "mridul@thyleads.com", password: "pod123", role: "pod", podId: "pod3", approverId: "bharath" },
   { name: "Sandeep", email: "sandeep@thyleads.com", password: "pod123", role: "pod", podId: "pod4", approverId: "bharath" },
-  { name: "Rashi", email: "rashi@thyleads.com", password: "pod123", role: "pod", podId: "pod4", approverId: "bharath" },
+  { name: "Pranesh", email: "pranesh@thyleads.com", password: "pod123", role: "pod", podId: "pod4", approverId: "bharath" },
   { name: "Thyleads", email: "portal-thyleads@thyleads.com", password: "client123", role: "client", projectId: "p1" },
   { name: "CleverTap", email: "portal-clevertap@thyleads.com", password: "client123", role: "client", projectId: "p2" },
   { name: "BlueDove", email: "portal-bluedove@thyleads.com", password: "client123", role: "client", projectId: "p3" },
@@ -34,6 +34,11 @@ export const SEED_USERS: SeedUser[] = [
   { name: "Pazo", email: "portal-pazo@thyleads.com", password: "client123", role: "client", projectId: "p10" },
   { name: "Venwiz", email: "portal-venwiz@thyleads.com", password: "client123", role: "client", projectId: "p11" },
   { name: "InFeedo", email: "portal-infeedo@thyleads.com", password: "client123", role: "client", projectId: "p12" },
+];
+
+export const REMOVED_SEED_EMAILS: string[] = [
+  "rajesh@thyleads.com",
+  "rashi@thyleads.com",
 ];
 
 const seedByEmail = new Map(SEED_USERS.map((u) => [u.email.toLowerCase(), u]));
@@ -50,25 +55,28 @@ interface ReconcilableUser {
   projectId?: string;
   approverId?: string;
   status?: string;
+  roleOverridden?: boolean;
+  podIdOverridden?: boolean;
   save: () => Promise<unknown>;
 }
 
 export async function reconcileRoleFromSeed(user: ReconcilableUser): Promise<boolean> {
   const spec = getSeedUser(user.email);
   if (!spec) return false;
-  const expectedPodId = spec.podId || "";
+  const expectedRole = user.roleOverridden ? user.role : spec.role;
+  const expectedPodId = user.podIdOverridden ? (user.podId || "") : (spec.podId || "");
   const expectedProjectId = spec.projectId || "";
   const expectedApproverId = spec.approverId || "";
   const drifted =
     user.name !== spec.name ||
-    user.role !== spec.role ||
+    user.role !== expectedRole ||
     (user.podId || "") !== expectedPodId ||
     (user.projectId || "") !== expectedProjectId ||
     (user.approverId || "") !== expectedApproverId ||
     (user.status || "approved") !== "approved";
   if (!drifted) return false;
   user.name = spec.name;
-  user.role = spec.role;
+  user.role = expectedRole;
   user.podId = expectedPodId;
   user.projectId = expectedProjectId;
   user.approverId = expectedApproverId;

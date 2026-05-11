@@ -3,7 +3,9 @@ import { connectDB } from "@/lib/mongodb";
 import UserModel from "@/lib/models/user";
 import DeletedSeedEmail from "@/lib/models/deleted-seed-email";
 import { SUPERADMIN_EMAIL } from "@/lib/user-approval";
-import { SEED_USERS } from "@/lib/seed-users";
+import { SEED_USERS, REMOVED_SEED_EMAILS } from "@/lib/seed-users";
+
+const REMOVED_EMAIL_SET = new Set(REMOVED_SEED_EMAILS.map((e) => e.toLowerCase()));
 
 function isSuperadmin(email: string): boolean {
   return (email || "").toLowerCase() === SUPERADMIN_EMAIL;
@@ -25,7 +27,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const docs = await UserModel.find({}).sort({ createdAt: -1 }).lean();
-  const users = docs.map((u) => {
+  const filteredDocs = docs.filter((u) => {
+    const email = ((u as { email?: string }).email || "").toLowerCase();
+    return !REMOVED_EMAIL_SET.has(email);
+  });
+  const users = filteredDocs.map((u) => {
     const x = u as unknown as {
       _id: { toString(): string };
       name: string;
@@ -89,8 +95,14 @@ export async function PATCH(req: NextRequest) {
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
   const update: Record<string, unknown> = {};
-  if (typeof body.podId === "string") update.podId = body.podId;
-  if (typeof body.role === "string" && ["superadmin", "admin", "pod", "client"].includes(body.role)) update.role = body.role;
+  if (typeof body.podId === "string") {
+    update.podId = body.podId;
+    update.podIdOverridden = true;
+  }
+  if (typeof body.role === "string" && ["superadmin", "admin", "pod", "client"].includes(body.role)) {
+    update.role = body.role;
+    update.roleOverridden = true;
+  }
   if (Object.keys(update).length === 0) return NextResponse.json({ error: "no fields to update" }, { status: 400 });
 
   const updated = await UserModel.findByIdAndUpdate(id, update, { new: true }).lean<{ email?: string; podId?: string; role?: string }>();

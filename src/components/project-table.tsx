@@ -18,7 +18,7 @@ import type { LucideIcon } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import type { PodInfo } from "@/lib/pod-context";
 import { useData, type ClientProject } from "@/lib/data-context";
-import { isInCurrentWeek } from "@/lib/week-range";
+import { getWeeklyTargetFromMonthly, getExpectedMeetingsToDate } from "@/lib/week-range";
 import { useAuth } from "@/lib/auth-context";
 import { useNotifications } from "@/lib/notification-context";
 import { staticLogoForName, extractDomain, logoFromWebsite } from "@/lib/client-logo";
@@ -135,7 +135,7 @@ const columns = [
   { key: "monthlyInt", label: "Monthly Target (Int)", short: "MT (Int)", breakpoint: 150, defaultWidth: 170, align: "right" as const },
   { key: "completion", label: "Completion %", short: "Comp %", breakpoint: 140, defaultWidth: 200, align: "left" as const },
   { key: "achieved", label: "Target Achieved", short: "Achieved", breakpoint: 150, defaultWidth: 180, align: "right" as const },
-  { key: "health", label: "Health (this week)", short: "Health", breakpoint: 130, defaultWidth: 170, align: "center" as const },
+  { key: "health", label: "Health (to date)", short: "Health", breakpoint: 130, defaultWidth: 170, align: "center" as const },
 ];
 
 function EditableNameCell({ project, editable, onSave, href, remarkCount, staticLogoSrc }: { project: ClientProject; editable: boolean; onSave: (patch: Partial<ClientProject>) => void; href: string; remarkCount: number; staticLogoSrc: string | null }) {
@@ -447,22 +447,8 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
     return projectStats[project.id]?.booked || 0;
   }
 
-  const weeklyDoneByProject = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const [projectId, list] of Object.entries(details)) {
-      let count = 0;
-      for (const d of list) {
-        if (d.meetingStatus === "done" && isInCurrentWeek(d.meetingDate)) count++;
-      }
-      out[projectId] = count;
-    }
-    return out;
-  }, [details]);
-
   function getWeeklyTarget(project: ClientProject): number {
-    if (project.weeklyTargetExternal > 0) return project.weeklyTargetExternal;
-    if (project.monthlyTargetInternal > 0) return Math.ceil(project.monthlyTargetInternal / 4);
-    return 0;
+    return getWeeklyTargetFromMonthly(project.monthlyTargetExternal);
   }
 
   useEffect(() => {
@@ -600,9 +586,12 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
       const booked = getFilteredBooked(p);
       const achieved = completed + booked;
       const pct = p.monthlyTargetInternal > 0 ? Math.round((completed / p.monthlyTargetInternal) * 100) : 0;
-      const health = pct >= 75 ? "On Track" : pct >= 50 ? "Needs Attention" : "At Risk";
+      const expectedToDate = getExpectedMeetingsToDate(p.monthlyTargetInternal);
+      const healthPct = expectedToDate === 0 ? 0 : Math.round((completed / expectedToDate) * 100);
+      const health = healthPct >= 75 ? "On Track" : healthPct >= 50 ? "Needs Attention" : "At Risk";
+      const weeklyExt = getWeeklyTargetFromMonthly(p.monthlyTargetExternal);
       const members = (p.assignedMembers || []).join(" · ");
-      return [p.clientId, p.clientName, members, String(p.monthlyTargetExternal), String(p.weeklyTargetExternal), String(p.monthlyTargetInternal), String(achieved), `${pct}%`, health];
+      return [p.clientId, p.clientName, members, String(p.monthlyTargetExternal), String(weeklyExt), String(p.monthlyTargetInternal), String(achieved), `${pct}%`, health];
     });
     const csv = [headers.join(","), ...rows.map((r) => r.map((v) => v.includes(",") ? `"${v}"` : v).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -794,10 +783,11 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
                   const completed = getFilteredCompleted(project);
                   const booked = getFilteredBooked(project);
                   const percent = project.monthlyTargetInternal === 0 ? 0 : Math.round((completed / project.monthlyTargetInternal) * 100);
-                  const weeklyDone = weeklyDoneByProject[project.id] || 0;
                   const weeklyTarget = getWeeklyTarget(project);
-                  const weeklyPct = weeklyTarget === 0 ? 0 : Math.round((weeklyDone / weeklyTarget) * 100);
-                  const health = getHealthStatus(weeklyPct);
+                  const expectedToDate = getExpectedMeetingsToDate(project.monthlyTargetInternal);
+                  const healthPct = expectedToDate === 0 ? 0 : Math.round((completed / expectedToDate) * 100);
+                  const completionStatus = getHealthStatus(percent);
+                  const health = getHealthStatus(healthPct);
                   const hc = healthConfig[health];
                   const StatusIcon = hc.icon;
                   return (
@@ -821,15 +811,15 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
                       />
 
                       <EditableTargetCell value={project.monthlyTargetExternal} editable={isAdmin} onSave={(v) => updateProject(project.id, { monthlyTargetExternal: v })} />
-                      <EditableTargetCell value={project.weeklyTargetExternal} editable={isAdmin} onSave={(v) => updateProject(project.id, { weeklyTargetExternal: v })} />
+                      <EditableTargetCell value={weeklyTarget} editable={false} onSave={() => {}} />
                       <EditableTargetCell value={project.monthlyTargetInternal} editable={isAdmin} onSave={(v) => updateProject(project.id, { monthlyTargetInternal: v })} />
 
                       <td className="px-6 py-4 overflow-hidden">
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-center gap-2 min-w-0" title={`${completed} of ${project.monthlyTargetInternal} monthly target (${percent}%)`}>
                           <div className="flex-1 h-2.5 bg-slate-100 rounded-full overflow-hidden">
                             <div
                               className={`h-full rounded-full transition-all duration-500 ease-out ${
-                                health === "green" ? "bg-emerald-500" : health === "amber" ? "bg-amber-400" : "bg-red-500"
+                                completionStatus === "green" ? "bg-emerald-500" : completionStatus === "amber" ? "bg-amber-400" : "bg-red-500"
                               }`}
                               style={{ width: `${Math.min(percent, 100)}%` }}
                             />
@@ -841,7 +831,9 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
                       </td>
 
                       <td className="px-6 py-4 text-right overflow-hidden">
-                        <span className="text-base font-semibold text-slate-900 tabular-nums">{completed}</span>
+                        <span className="text-base font-semibold text-slate-900 tabular-nums" title={`${completed} of ${project.monthlyTargetInternal} monthly target`}>
+                          {completed}/{project.monthlyTargetInternal || "?"}
+                        </span>
                         {booked > 0 && (
                           <span className="text-[10px] text-amber-500 font-medium ml-1.5">+{booked}</span>
                         )}
@@ -851,10 +843,10 @@ export default function ProjectTable({ selectedMonth, selectedYear }: ProjectTab
                         <div className="flex justify-center">
                           <span
                             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border whitespace-nowrap ${hc.bg} ${hc.text} ${hc.border}`}
-                            title={weeklyTarget === 0 ? "No weekly target set" : `${weeklyDone} of ${weeklyTarget} this week (${weeklyPct}%)`}
+                            title={expectedToDate === 0 ? "No monthly target set" : `${completed} of ${expectedToDate} expected by today (${healthPct}%)`}
                           >
                             <StatusIcon size={14} className={`shrink-0 ${hc.iconColor}`} />
-                            <span className="truncate">{hc.label} · {weeklyDone}/{weeklyTarget || "?"}</span>
+                            <span className="truncate">{hc.label} · {completed}/{expectedToDate || "?"} <span className="opacity-60">today</span></span>
                           </span>
                         </div>
                       </td>

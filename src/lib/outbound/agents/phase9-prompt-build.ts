@@ -27,6 +27,40 @@ function joinList(items: string[] | undefined, sep = ", "): string {
   return items.join(sep);
 }
 
+// VWO_CLIENT_SKILL.md per-archetype subject defaults.
+// Used as suggestion list to guide Claude's subject 1 selection when icpRole is known.
+const VWO_SUBJECT_DEFAULTS: Record<string, string[]> = {
+  "Founder/CEO": ["your homepage", "your demo button", "your launch page", "your pricing page"],
+  "VP Marketing": ["your homepage hero", "your demo form", "your checkout flow", "your category page", "your meta ads", "your signup funnel"],
+  "Head of Growth": ["your homepage hero", "your demo form", "your meta ads", "your signup funnel"],
+  "Head of Product": ["your onboarding step", "your trial gate", "your empty state", "your signup screen", "your paywall"],
+  "CTO/VP Eng": ["your kyc step", "your sso flow", "your signup api"],
+  "VP Sales": ["your demo form", "your pricing page"],
+  "CFO": ["your pricing page", "your demo form"],
+  "Other": ["your homepage", "your funnel"],
+};
+
+// VWO_CLIENT_SKILL.md capability rotation table.
+// Body 1 capability → Body 2 must use a DIFFERENT capability from the matched pair.
+const VWO_CAPABILITY_PAIRS: Array<{ body1: string; body2: string }> = [
+  { body1: "A/B test on hero personalisation", body2: "form analytics + heatmaps on demo/checkout" },
+  { body1: "A/B test on hero personalisation", body2: "session recordings + funnel reports on signup/onboarding" },
+  { body1: "heatmaps + A/B test on PDP", body2: "personalisation by visitor source on category/landing" },
+  { body1: "form analytics on KYC", body2: "A/B test on form-step splits" },
+  { body1: "session recordings", body2: "on-page surveys + visitor segmentation" },
+];
+
+// Sibling-lead capability rotation pool — used when multiple leads land on the same account.
+// Each sibling gets a different body-2 capability. Index by sibling order (0-indexed).
+const SIBLING_CAPABILITY_ROTATION: string[] = [
+  "form analytics + heatmaps on demo/pricing form",
+  "session recordings + funnel reports on signup/onboarding",
+  "personalisation by visitor source on category/landing",
+  "A/B test on form-step splits",
+  "on-page surveys + visitor segmentation",
+  "heatmaps on fee-section visibility (or equivalent persona-segmented surface)",
+];
+
 export function buildLeadPrompt(args: {
   sellerName: string;
   account: ScoredAccount;
@@ -34,6 +68,8 @@ export function buildLeadPrompt(args: {
   research: LeadResearch;
   email: string;
   emailStatus: string;
+  siblingIndex?: number;
+  siblingTotal?: number;
 }): string {
   const { sellerName, account, stakeholder, research } = args;
 
@@ -104,11 +140,29 @@ export function buildLeadPrompt(args: {
   lines.push("RULES (from SKILL in project instructions)");
   lines.push("- Body 1: 90-130 words, 3 paragraphs, must open \"I was checking out " + (account.name || "{company}") + "'s website and noticed...\" then bridge to the OPENER OBSERVATION above, then to TOP PAIN.");
   lines.push("- Body 1 paragraph 2 must say \"That's exactly what " + sellerName + " helps with\" and stack the three social-proof brands listed above (in that order).");
-  lines.push("- Body 1 must include the reassurance line (\"Often, these don't require a full redesign. Even small, validated changes can create measurable improvements.\") and the ease coda (\"without heavy dev effort\").");
+  lines.push("- Body 1 must include the reassurance line VERBATIM: \"Often, these don't require a full redesign. Even small, validated changes can create measurable improvements.\" AND the ease coda VERBATIM: \"without heavy dev effort\". Do NOT paraphrase either.");
   lines.push("- Body 1 paragraph 3: a 15-25 word CTA naming \"" + (account.name || "{company}") + "\" and \"20 min\".");
   lines.push("- Body 2: 70-110 words, 2-3 paragraphs. MUST weave in the SOCIAL ANGLE / PERSON EVIDENCE if present (1 line, conversational, NOT a stalker-vibe). Then DIFFERENT capability + DIFFERENT observation from body 1.");
   lines.push("- Body 3: 50-90 words, 2 paragraphs, breakup tone, no new pitch. If a body-3 breakup hook is provided above, anchor on it.");
-  lines.push("- Subjects: 4-6 words, title-case, format \"" + (stakeholder.firstName || "{First Name}") + ", <Topic>\". 3 subjects must differ in topic.");
+  if (sellerName.toLowerCase().includes("vwo") || sellerName.toLowerCase().includes("wingify")) {
+    const archetypeKey = (research.icpRole || "Other") as keyof typeof VWO_SUBJECT_DEFAULTS;
+    const archetypeSubjects = VWO_SUBJECT_DEFAULTS[archetypeKey] || VWO_SUBJECT_DEFAULTS["Other"];
+    lines.push("- Subjects: 2-4 words AFTER first-name, ≤32 chars total, ≤5 words including first name, format \"" + (stakeholder.firstName || "{First Name}") + ", <observation>\". Lowercase-leaning. 3 subjects must differ in topic.");
+    lines.push(`- Persona-tailored subject hints for ICP role "${archetypeKey}" (pick whichever fits the OPENER OBSERVATION best for subject 1; vary topic for subjects 2 & 3): ${archetypeSubjects.map((s) => `"${stakeholder.firstName || "{First Name}"}, ${s}"`).join(" | ")}.`);
+    lines.push("- BANNED subject vocabulary (V-VWO-5): \"VWO\", \"Wingify\", \"experimentation\", \"A/B test\", \"AB test\", \"CRO\", \"conversion\", \"optimisation\", \"optimization\". Subject lines must NOT contain any of these.");
+    lines.push("- BANNED metric quotes (V-VWO-2): only these percentages may appear in body 1 / body 2 — Andaaz Fashion 125%, Attrangi 50%, HDFC ERGO 47%, ICICI Lombard 44%, Yuppiechef 100%, POSist (Restroworks) 52%, Billund Airport 49.85%. Do NOT invent any other metric.");
+    lines.push("- BANNED social proof: any brand NOT in the social-proof line above. (V-VWO-1)");
+    // V-VWO-4 capability rotation — sibling-lead differentiation.
+    if (typeof args.siblingTotal === "number" && args.siblingTotal > 1 && typeof args.siblingIndex === "number") {
+      const cap = SIBLING_CAPABILITY_ROTATION[args.siblingIndex % SIBLING_CAPABILITY_ROTATION.length];
+      lines.push(`- V-VWO-4 sibling-lead capability rotation: this lead is sibling ${args.siblingIndex + 1} of ${args.siblingTotal} at the same company. Use THIS specific VWO capability in body 2 (different from siblings): ${cap}.`);
+    }
+    // Capability rotation pairs reference for body 1 → body 2 selection
+    const pairList = VWO_CAPABILITY_PAIRS.map((p) => `(${p.body1} → ${p.body2})`).join(" | ");
+    lines.push(`- VWO body-1→body-2 capability pairs: ${pairList}. Pick whichever pair fits the OPENER OBSERVATION best, and use the body-2 side for body 2.`);
+  } else {
+    lines.push("- Subjects: 4-6 words, title-case, format \"" + (stakeholder.firstName || "{First Name}") + ", <Topic>\". 3 subjects must differ in topic.");
+  }
   lines.push("- BANNED openers: \"Saw your Series C\", \"Congrats on your raise\", \"Read about your acquisition\", \"Hope this finds you well\".");
   lines.push("- No greetings, no sign-offs in any body. No em dashes. No spintax. No template variables.");
 
@@ -117,7 +171,22 @@ export function buildLeadPrompt(args: {
 
 export function promptBuildAgent(input: PromptBuildInput): { output: PromptBuildOutput; state: Pick<PhaseState, "log" | "metrics" | "inputCount" | "outputCount"> } {
   const prompts: CompiledPrompt[] = [];
+
+  // Compute sibling index per (account.domain) so leads at the same company
+  // get different capability rotations in body 2 (V-VWO-4 sibling differentiation).
+  const siblingTotalsByDomain = new Map<string, number>();
   for (const row of input.rows) {
+    const dom = (row.account.domain || "").toLowerCase();
+    siblingTotalsByDomain.set(dom, (siblingTotalsByDomain.get(dom) || 0) + 1);
+  }
+  const siblingCursors = new Map<string, number>();
+
+  for (const row of input.rows) {
+    const dom = (row.account.domain || "").toLowerCase();
+    const siblingIndex = siblingCursors.get(dom) ?? 0;
+    siblingCursors.set(dom, siblingIndex + 1);
+    const siblingTotal = siblingTotalsByDomain.get(dom) || 1;
+
     const prompt = buildLeadPrompt({
       sellerName: input.sellerName,
       account: row.account,
@@ -125,6 +194,8 @@ export function promptBuildAgent(input: PromptBuildInput): { output: PromptBuild
       research: row.research,
       email: row.email,
       emailStatus: row.emailStatus,
+      siblingIndex,
+      siblingTotal,
     });
     prompts.push({ domain: row.account.domain, personKey: row.stakeholder.personKey || "", fullName: row.stakeholder.fullName, prompt });
   }

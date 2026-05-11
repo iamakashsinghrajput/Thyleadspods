@@ -1,6 +1,6 @@
 import { llm, extractJson } from "@/lib/onboarding/llm";
 import { tavilySearch, isTavilyLive, summarizeForObservation } from "../tavily";
-import { coreSignalSnapshot, isCoreSignalLive, summarizeCoreSignal } from "../coresignal";
+import { coreSignalSnapshot, isCoreSignalLive, summarizeCoreSignal, resetCoreSignalCredits, getCoreSignalCreditsUsed, coreSignalCreditsRemaining } from "../coresignal";
 import { apifySnapshot, isApifyLive, type ApifySnapshotResult } from "../apify";
 import { classifySignals, summarizeSignalsForLLM, mergeApifyIntoCoreSignal, type StructuredSignals } from "./signals";
 import type { LeadResearch, PhaseState, ScoredAccount, Stakeholder } from "../types";
@@ -40,6 +40,7 @@ export interface ResearchInput {
   sellerName?: string;
   shouldCancel?: () => Promise<boolean>;
   signal?: AbortSignal;
+  coreSignalOnly?: boolean;
 }
 
 export interface ResearchOutput {
@@ -50,34 +51,54 @@ export interface ResearchOutput {
   cacheHits: number;
 }
 
+// VWO_CLIENT_SKILL.md verified-metric library. Verified metrics (only these may be quoted):
+//   Andaaz Fashion 125%, Attrangi 50%, HDFC ERGO 47%, ICICI Lombard 44%,
+//   Yuppiechef 100%, POSist 52%, Billund Airport 49.85%
 const SOCIAL_PROOF_DEFAULTS: Record<string, string[]> = {
-  retail: ["BigBasket", "Yuppiechef", "eBay"],
+  // D2C-Apparel / Fashion
   apparel: ["Andaaz Fashion", "Attrangi", "Utsav Fashion"],
-  ecommerce: ["BigBasket", "Yuppiechef", "Lenskart"],
-  fintech: ["PayU", "HDFC Bank", "ICICI Bank"],
-  bfsi: ["HDFC Bank", "ICICI Bank", "PayU"],
-  banking: ["HDFC Bank", "ICICI Bank", "PayU"],
-  insurance: ["HDFC Bank", "ICICI Bank", "PayU"],
-  edtech: ["Online Manipal", "UNext", "BYJU'S"],
-  saas: ["POSist", "PayScale", "ChargeBee"],
-  wellness: ["Amway", "Wakefit", "boAt"],
-  marketplace: ["BigBasket", "eBay", "BookMyShow"],
-  jobs: ["BookMyShow", "BigBasket", "eBay"],
-  recruitment: ["BookMyShow", "BigBasket", "eBay"],
-  staffing: ["BookMyShow", "BigBasket", "eBay"],
-  internet: ["BigBasket", "BookMyShow", "Yatra"],
-  travel: ["Yatra", "Singapore Airlines", "BookMyShow"],
-  hospitality: ["Yatra", "Singapore Airlines", "BookMyShow"],
-  automotive: ["Hyundai", "TVS Motor", "Lenskart"],
-  healthcare: ["BigBasket", "Wakefit", "HDFC Bank"],
-  beauty: ["Lenskart", "Wakefit", "boAt"],
-  food: ["BigBasket", "Yuppiechef", "BookMyShow"],
-  media: ["BookMyShow", "Yatra", "BigBasket"],
-  telecom: ["HDFC Bank", "ICICI Bank", "BigBasket"],
-  realestate: ["HDFC Bank", "ICICI Bank", "BigBasket"],
-  gaming: ["BookMyShow", "BigBasket", "boAt"],
-  d2c: ["Lenskart", "Wakefit", "boAt"],
-  default: ["BigBasket", "HDFC Bank", "Lenskart"],
+  fashion: ["Andaaz Fashion", "Attrangi", "Utsav Fashion"],
+  // D2C-Beauty / Wellness / FMCG
+  beauty: ["Amway", "Andaaz Fashion", "Indian D2C brands at your stage"],
+  wellness: ["Amway", "Andaaz Fashion", "Indian D2C brands at your stage"],
+  fmcg: ["Amway", "Andaaz Fashion", "Indian D2C brands at your stage"],
+  // Ecom / Marketplace / Retail
+  retail: ["eBay", "BigBasket", "Yuppiechef"],
+  ecommerce: ["eBay", "BigBasket", "Yuppiechef"],
+  marketplace: ["eBay", "BigBasket", "Yuppiechef"],
+  // Fintech / Payments / Wallets
+  fintech: ["HDFC Bank", "PayU", "Indian fintech players"],
+  // BFSI / Insurance / Banking — strongest single trio
+  bfsi: ["HDFC ERGO", "ICICI Lombard", "HDFC Bank"],
+  insurance: ["HDFC ERGO", "ICICI Lombard", "HDFC Bank"],
+  banking: ["HDFC ERGO", "ICICI Lombard", "HDFC Bank"],
+  // EdTech
+  edtech: ["Online Manipal", "UNext", "Indian EdTech players at your stage"],
+  // SaaS B2B
+  saas: ["POSist (Restroworks)", "PayScale", "Indian SaaS players"],
+  // Health / Diagnostics / Hospitals — proxy via BFSI trio
+  healthcare: ["HDFC ERGO", "ICICI Lombard", "Indian healthtech brands"],
+  health: ["HDFC ERGO", "ICICI Lombard", "Indian healthtech brands"],
+  diagnostics: ["HDFC ERGO", "ICICI Lombard", "Indian healthtech brands"],
+  hospitals: ["HDFC ERGO", "ICICI Lombard", "Indian healthtech brands"],
+  // Travel / Mobility / Hospitality
+  travel: ["Virgin Holidays", "Billund Airport", "Indian travel players"],
+  mobility: ["Virgin Holidays", "Billund Airport", "Indian travel players"],
+  hospitality: ["Virgin Holidays", "Billund Airport", "Indian travel players"],
+  // Default fallback — strongest universal trio
+  default: ["HDFC ERGO", "ICICI Lombard", "HDFC Bank"],
+};
+
+// Verified-metric registry — used by Phase 9 prompt to enforce V-VWO-2 (no other metrics may be quoted).
+export const VWO_VERIFIED_METRICS: Record<string, string> = {
+  "Andaaz Fashion": "125% conversion lift",
+  "Attrangi": "50% RPV lift",
+  "HDFC ERGO": "47% CPA drop",
+  "ICICI Lombard": "44% lead-form lift",
+  "Yuppiechef": "100% category-page lift",
+  "POSist (Restroworks)": "52% demo-request lift",
+  "POSist": "52% demo-request lift",
+  "Billund Airport": "49.85% click-through lift",
 };
 
 const SOCIAL_PROOF_KEYWORDS: Record<string, string> = {
@@ -368,6 +389,169 @@ const CATEGORY_HINTS: Record<string, CategoryHint> = {
       "if your sales-cycle on the next quarter doesn't compress",
     ],
   },
+  // VWO_CLIENT_SKILL.md observation library — BFSI / Insurance / Banking
+  bfsi: {
+    primary: [
+      "your quote-page form on {domain} runs 15+ fields in a single step before showing the indicative premium",
+      "your lead form on {domain} serves both retail and SME buyers with the same fields and same CTA",
+      "your hospital-network lookup on {domain} sits two steps before the quote, adding friction before intent is captured",
+      "your KYC step on {domain} asks for PAN, Aadhaar OTP, and bank linkage across 3-4 near-back-to-back screens",
+      "your homepage on {domain} runs one hero CTA for first-time buyers and renewal customers",
+    ],
+    secondary: [
+      "your premium calculator buries SME-vs-retail toggle below the form",
+      "your renewal flow uses the same fields as new-policy purchase",
+      "your trust signals (claim ratio, IRDAI badge) sit below the fold on mobile",
+    ],
+    b3: [
+      "if quote-to-purchase CVR stays under 8% on retail traffic",
+      "if your renewal-month volume spikes overload the form-step funnel",
+      "if your IRDAI quarterly numbers show CPA pressure in non-metro geos",
+    ],
+  },
+  insurance: {
+    primary: [
+      "your quote-form on {domain} runs 15+ fields before any indicative premium",
+      "your lead form serves retail and SME with one set of fields",
+      "your hospital-network lookup on {domain} adds friction before quote intent",
+    ],
+    secondary: [
+      "your renewal CTA buries plan upgrades under accordions",
+      "your trust signals (IRDAI registration, claim ratio) sit below the fold",
+    ],
+    b3: [
+      "if retail quote-to-purchase rate stays under 8%",
+      "if non-metro CAC climbs ahead of the next campaign",
+    ],
+  },
+  banking: {
+    primary: [
+      "your savings-account signup on {domain} runs PAN + Aadhaar + bank-linkage + selfie liveness across 4 screens",
+      "your homepage on {domain} serves first-time investors AND active F&O traders AND mutual-fund investors with one CTA",
+      "your demo/calculator pages on {domain} ask the same fields regardless of buyer segment",
+    ],
+    secondary: [
+      "your branch-locator UX competes with the open-an-account CTA on mobile",
+      "your loan calculator is buried two clicks below the home hero",
+    ],
+    b3: [
+      "if your KYC drop-off stays above 35% on tier-2 traffic",
+      "if your cross-sell rate from savings-to-MF stays flat after the next campaign",
+    ],
+  },
+  // VWO_CLIENT_SKILL.md observation library — Travel / Mobility / Hospitality
+  travel: {
+    primary: [
+      "your search form on {domain} defaults to round-trip when most Indian queries are one-way",
+      "your route page on {domain} hits density that's hard to scan for tier-2/3 city searches",
+      "your COD vs prepay messaging on {domain} is buried under the booking summary instead of at decision time",
+      "your homepage hero on {domain} promotes one origin city without geo-personalisation",
+    ],
+    secondary: [
+      "your cancel-policy lives on a separate page instead of inline at the booking step",
+      "your fare-alerts CTA sits at the bottom of the route page",
+      "your loyalty-tier preview shows only after login, not during the search step",
+    ],
+    b3: [
+      "if your tier-2/3 cohort CVR plateaus on the festive corridor demand",
+      "if your COD-to-prepaid mix stays heavily skewed past the next quarter",
+      "if your direct-booking share doesn't lift against OTAs after the next campaign",
+    ],
+  },
+  mobility: {
+    primary: [
+      "your booking flow on {domain} routes B2B fleet and B2C consumer through the same hero",
+      "your route-search defaults don't match Indian one-way search bias",
+      "your prepay vs COD messaging is hidden until the address step",
+    ],
+    secondary: [
+      "your driver-rating filter is buried under 'More options'",
+      "your fare-estimate calculator runs after the location-pin step instead of before",
+    ],
+    b3: [
+      "if your B2B fleet CVR doesn't lift after the next sales push",
+      "if your tier-2 corridor CAC rises against direct competitors",
+    ],
+  },
+  hospitality: {
+    primary: [
+      "your room-detail page on {domain} buries amenities under tabs instead of inline",
+      "your booking calendar runs same UX for business and leisure travellers",
+      "your trust signals (cleanliness rating, free-cancellation) sit below the fold",
+    ],
+    secondary: [
+      "your group-booking CTA competes with single-room booking on mobile",
+      "your loyalty-program CTA sits below the fold on the homepage",
+    ],
+    b3: [
+      "if your direct-booking share stays under 25% next quarter",
+      "if your weekend-vs-weekday CVR delta widens after the next pricing update",
+    ],
+  },
+  // VWO_CLIENT_SKILL.md observation library — Health / Diagnostics / Hospitals
+  healthcare: {
+    primary: [
+      "your lead form on {domain} for B2B (insurer/corporate) and B2C (patient) uses identical fields",
+      "your treatment page on {domain} serves international patient + family caregiver + hospital partner with one CTA",
+      "your trust signals (NABH/JCI, doctor profiles, certifications) sit below the fold",
+      "your appointment-booking step on {domain} requires login before showing slot availability",
+    ],
+    secondary: [
+      "your cost-estimate calculator runs after location selection instead of before",
+      "your insurance-coverage filter is buried under 'More info'",
+      "your second-opinion CTA competes with new-appointment CTA on the homepage",
+    ],
+    b3: [
+      "if your international-patient lead volume stays flat against marketing spend",
+      "if your same-day-appointment booking rate stays under 20%",
+      "if your specialist-routing CVR doesn't lift after the next site update",
+    ],
+  },
+  health: {
+    primary: [
+      "your appointment-booking on {domain} requires login before showing slot availability",
+      "your B2B/B2C lead form runs same fields with one CTA",
+      "your treatment-detail tone serves multiple personas (patient/family/partner) with no segmentation",
+    ],
+    secondary: [
+      "your trust signals are below the fold on mobile",
+      "your cost-estimate runs after location instead of before",
+    ],
+    b3: [
+      "if your international-patient lead volume stays flat",
+      "if your specialist-routing CVR stays under 12%",
+    ],
+  },
+  diagnostics: {
+    primary: [
+      "your test-package PDP on {domain} doesn't show home-collection availability above the fold",
+      "your B2B (corporate health camp) lead form uses same fields as B2C patient bookings",
+      "your prep-instructions page sits 2 clicks deep instead of inline at booking",
+    ],
+    secondary: [
+      "your test-result pickup option is buried in account settings",
+      "your bundle-test pricing doesn't surface savings vs single tests",
+    ],
+    b3: [
+      "if your home-collection booking share stays under 40%",
+      "if your tier-2 city CAC rises before the next health-pack campaign",
+    ],
+  },
+  hospitals: {
+    primary: [
+      "your specialist-routing on {domain} requires login before showing availability",
+      "your insurance-coverage filter sits under 'More info' instead of at first step",
+      "your appointment confirmation step adds 3 fields after intent is captured",
+    ],
+    secondary: [
+      "your second-opinion CTA competes with new-appointment CTA on the homepage",
+      "your COVID-protocol or NABH badges sit below the fold on mobile",
+    ],
+    b3: [
+      "if your specialist-booking CVR stays under 15%",
+      "if your second-opinion conversion stays flat against marketing spend",
+    ],
+  },
 };
 
 function hashCode(s: string): number {
@@ -401,7 +585,10 @@ const RESEARCH_PLANNER_SYSTEM = `You are the orchestrating brain of an outbound 
 
 Tools available:
 - TAVILY (web search) — best for: India press, blogs, podcasts, conferences, Substack/Medium, Twitter/X. Limited LinkedIn access. Site-targeted queries (site:inc42.com, site:moneycontrol.com, site:economictimes.indiatimes.com, site:livemint.com, site:yourstory.com, site:entrackr.com, site:ken.in, site:thearcweb.com, site:saasboomi.in, site:nasscom.in, site:ethrworld.com, site:etcio.com, site:etbrandequity.com) drastically improve quality vs generic web search.
-- APIFY (LinkedIn) — company scraper, jobs scraper, profile scraper for the named stakeholder.
+- APIFY (LinkedIn) — company scraper, jobs scraper, profile scraper for the named stakeholder. NOTE: when seller is VWO/Wingify, Apify is OUT of policy and disabled at runtime — do NOT include apify_jobs in your plan output.
+
+VWO_CLIENT_SKILL constraint:
+- AXIS 3b (page/pricing changes via watcher infra) is NOT AVAILABLE in this toolstack. Set axis_3b: null, source: "watcher_infrastructure_not_configured" in the structured signals output. NEVER fabricate page-change observations as if they were real signals — only use what Tavily / Coresignal actually returned.
 
 You decide based on:
 1. The seller's brief (what they sell, who they sell to, common pains, target personas)
@@ -543,11 +730,33 @@ async function researchOneLead(
     prospect_specific_anchor_hint: string;
     rationale: string;
   };
+  // VWO_CLIENT_SKILL.md Tavily templates — full set of 8 query types (axis 2 articles, axis 3a hiring, axis 3c competitor, axis 3d press/funding/launch/leadership).
+  // We pick TWO queries per account from the most-relevant pair given what's known about the lead/account.
+  // The planner can override; if it doesn't, these defaults get used.
+  const isVwoSeller = ((sellerName || "VWO") as string).toLowerCase().includes("vwo") || ((sellerName || "") as string).toLowerCase().includes("wingify");
+  const leadName = row.stakeholder?.fullName || "";
+  const vwoTavilyTemplates = {
+    leadPosts: leadName ? `"${leadName}" growth OR experiment OR conversion site:substack.com OR site:medium.com OR site:linkedin.com` : "",
+    leadTalks: leadName ? `"${leadName}" speaker OR keynote site:saasboomi.in OR site:nasscom.in OR site:inc42.com` : "",
+    leadOpinionsCMO: leadName ? `"${leadName}" site:etbrandequity.com OR site:economictimes.indiatimes.com` : "",
+    leadOpinionsProduct: leadName ? `"${leadName}" site:yourstory.com OR site:inc42.com` : "",
+    companyFunding: `"${row.account.name}" funding OR raise OR Series site:inc42.com OR site:entrackr.com OR site:moneycontrol.com OR site:livemint.com`,
+    companyLaunch: `"${row.account.name}" launches OR launched OR unveils site:inc42.com OR site:yourstory.com OR site:economictimes.indiatimes.com`,
+    companyHiring: `"${row.account.name}" hires OR appoints OR hired site:economictimes.indiatimes.com OR site:livemint.com OR site:moneycontrol.com`,
+    leadershipChange: `"${row.account.name}" "joined as" OR "appointed" OR "named" site:economictimes.indiatimes.com OR site:moneycontrol.com OR site:livemint.com`,
+  };
+  // Pick the two highest-signal queries by default: leadership change (axis 3d, strong VWO signal per skill) + funding.
+  // If the lead has a known name, prepend their LinkedIn-post search (axis 2).
+  const vwoQueries = isVwoSeller
+    ? (leadName
+        ? [vwoTavilyTemplates.leadPosts, vwoTavilyTemplates.leadershipChange].filter(Boolean)
+        : [vwoTavilyTemplates.leadershipChange, vwoTavilyTemplates.companyFunding])
+    : [
+        `${row.account.name} ${row.account.domain} customers products business model india`,
+        `${row.account.name} growth funding hiring expansion conversion india`,
+      ];
   const defaultPlan: ResearchPlan = {
-    tavily_queries: [
-      `${row.account.name} ${row.account.domain} customers products business model india`,
-      `${row.account.name} growth funding hiring expansion conversion india`,
-    ],
+    tavily_queries: vwoQueries,
     post_keywords_to_filter: strategy?.postKeywords?.slice(0, 8) || [],
     title_keywords_to_search: strategy?.championTitles?.slice(0, 6) || [],
     observation_surface_priorities: ["homepage hero", "demo form", "pricing page", "category density"],
@@ -799,17 +1008,31 @@ export async function researchAgent(input: ResearchInput): Promise<{ output: Res
   const log: string[] = [];
   const notes: { domain: string; research: LeadResearch }[] = [];
   const useAi = input.useAi === true;
-  const tavilyAvailable = useAi && isTavilyLive();
+  const csOnly = input.coreSignalOnly === true;
+  // SKILL doc said "Apify out of policy for VWO" — operator has overridden that constraint
+  // explicitly ("with using any api, atmost credits, just get me that detail"). Apify is
+  // now enabled for all sellers when the API key is set, because it's the only source that
+  // reliably returns ACTUAL LinkedIn post text per stakeholder.
+  const sellerLc = (input.sellerName || "VWO").toLowerCase();
+  const isVwoSeller = sellerLc.includes("vwo") || sellerLc.includes("wingify");
+  const tavilyAvailable = useAi && !csOnly && isTavilyLive();
   const coreSignalAvailable = useAi && isCoreSignalLive();
-  const apifyAvailable = useAi && isApifyLive();
+  const apifyAvailable = useAi && !csOnly && isApifyLive();
   const tavilyBudget = input.tavilyMaxLeads ?? 30;
   const cache = input.existingNotes || new Map<string, LeadResearch>();
+
+  if (coreSignalAvailable) {
+    resetCoreSignalCredits();
+  }
 
   if (!useAi) {
     log.push("Deterministic mode: zero LLM/Tavily/CoreSignal cost. Per-industry observation table only.");
   } else {
     log.push(tavilyAvailable ? `Tavily live. Budget: up to ${tavilyBudget} per-lead searches (Tier A+B).` : "Tavily mock: TAVILY_API_KEY not set, using category-level fallbacks.");
-    log.push(coreSignalAvailable ? `CoreSignal live: structured signals (jobs, headcount, funding, tech) + LinkedIn member intelligence on top of Tavily.` : "CoreSignal off: CORESIGNAL_API_KEY not set.");
+    log.push(coreSignalAvailable ? `CoreSignal live (cost-minimised): only Company Base enrich + Employee Base collect. No multi-source, no jobs API. Capped at ${coreSignalCreditsRemaining()} credits per run (set CORESIGNAL_CREDITS_BUDGET in .env.local to override; default 10).` : "CoreSignal off: CORESIGNAL_API_KEY not set.");
+    if (isVwoSeller) {
+      log.push(`VWO_CLIENT_SKILL v7 active — CoreSignal Tier-A, VWO scoring weights, holding-company exclusion, fiscal calendar timing, banned subject vocab + verbatim phrases enforced. (Apify ENABLED per operator override — was previously force-disabled per the SKILL doc.)`);
+    }
     log.push(apifyAvailable ? `Apify live: LinkedIn company + jobs scrapers as primary intelligence (auto-merged with CoreSignal output when both run).` : "Apify off: APIFY_API_KEY not set.");
     log.push(`Claude orchestrator: planning Tavily queries + Apify configs per account via Haiku before tools fire (the brain). Then Sonnet synthesis on the fetched data.`);
     if (input.insightStrategy && input.insightStrategy.championTitles.length > 0) {
@@ -909,7 +1132,8 @@ export async function researchAgent(input: ResearchInput): Promise<{ output: Res
     }
   }
 
-  log.push(`Generated ${notes.length} observation sets. Cache hits: ${cacheHits}. Tavily calls: ${tavilyCalls}${tavilyErrors > 0 ? ` (${tavilyErrors} errors)` : ""}. CoreSignal hits: ${coreSignalCalls}${coreSignalErrors > 0 ? ` (${coreSignalErrors} errors)` : ""}. Apify hits: ${apifyCalls}${apifyErrors > 0 ? ` (${apifyErrors} errors)` : ""}. LLM tokens in/out: ${tokensIn}/${tokensOut}.`);
+  const csCreditsUsed = coreSignalAvailable ? getCoreSignalCreditsUsed() : 0;
+  log.push(`Generated ${notes.length} observation sets. Cache hits: ${cacheHits}. Tavily calls: ${tavilyCalls}${tavilyErrors > 0 ? ` (${tavilyErrors} errors)` : ""}. CoreSignal hits: ${coreSignalCalls}${coreSignalErrors > 0 ? ` (${coreSignalErrors} errors)` : ""}${coreSignalAvailable ? ` · ${csCreditsUsed} CoreSignal credits used` : ""}. Apify hits: ${apifyCalls}${apifyErrors > 0 ? ` (${apifyErrors} errors)` : ""}. LLM tokens in/out: ${tokensIn}/${tokensOut}.`);
 
   return {
     output: { notes, llmTokensIn: tokensIn, llmTokensOut: tokensOut, tavilyCalls, cacheHits },

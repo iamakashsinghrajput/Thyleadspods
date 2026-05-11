@@ -31,6 +31,55 @@ interface ApolloPersonRow {
   title?: string;
   linkedin_url?: string;
   seniority?: string;
+  organization?: {
+    primary_domain?: string;
+    name?: string;
+    website_url?: string;
+  };
+  organization_id?: string;
+}
+
+function normaliseDomainRoot(s: string): string {
+  return (s || "")
+    .toLowerCase()
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "")
+    .replace(/\?.*$/, "")
+    .trim();
+}
+
+// Strict-match guard: only keep people whose Apollo organization.primary_domain matches
+// the requested domain root. Apollo can return people from acquired/parent companies or
+// alias domains (libas.in → libaas.in / libaas.com / libasify.com), so without this filter
+// we'd pull leads from the wrong company.
+//
+// CRITICAL: rows without organization data are REJECTED, not kept. Apollo's name-based
+// fallback search can return mixed results from similarly-named orgs, and we can't verify
+// them — better to lose an unverifiable lead than ship one from the wrong company.
+function filterPeopleByDomain(people: ApolloPersonRow[], targetDomain: string): { kept: ApolloPersonRow[]; rejected: Array<{ person: ApolloPersonRow; orgDomain?: string; reason: string }> } {
+  const targetRoot = normaliseDomainRoot(targetDomain);
+  const kept: ApolloPersonRow[] = [];
+  const rejected: Array<{ person: ApolloPersonRow; orgDomain?: string; reason: string }> = [];
+  for (const p of people) {
+    const orgDomainRaw = p.organization?.primary_domain || p.organization?.website_url || "";
+    const orgRoot = normaliseDomainRoot(orgDomainRaw);
+    if (!orgRoot) {
+      // Apollo omitted organization details on this row — we cannot verify which company
+      // this person actually belongs to, so we reject. This closes the hole where the
+      // name-based fallback search returned people from "Libaas" (with no org details)
+      // when the operator asked for "libas.in".
+      rejected.push({ person: p, orgDomain: undefined, reason: "no_organization_data" });
+      continue;
+    }
+    if (orgRoot === targetRoot) {
+      kept.push(p);
+    } else {
+      rejected.push({ person: p, orgDomain: orgDomainRaw, reason: `org_domain_mismatch:${orgRoot}` });
+    }
+  }
+  return { kept, rejected };
 }
 
 const DECISION_MAKER_TITLES = [
@@ -76,12 +125,55 @@ async function searchPeopleApollo(domain: string, titles: string[], apiKey: stri
   return data.people || data.contacts || [];
 }
 
+// Fallback for domains Apollo doesn't index by primary_domain (e.g. bikewale.com,
+// libas.in — owned by parent companies in Apollo). Search by company-name keyword.
+async function searchPeopleByCompanyName(name: string, titles: string[], apiKey: string, signal?: AbortSignal): Promise<ApolloPersonRow[]> {
+  if (!name) return [];
+  const res = await fetch("https://api.apollo.io/v1/mixed_people/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Api-Key": apiKey },
+    body: JSON.stringify({
+      q_organization_name: name,
+      person_titles: titles,
+      person_seniorities: ["owner", "founder", "c_suite", "vp", "head"],
+      include_similar_titles: true,
+      per_page: 25,
+    }),
+    signal: withTimeout(signal, APOLLO_FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`apollo people name-search ${res.status}`);
+  const data = (await res.json()) as { people?: ApolloPersonRow[]; contacts?: ApolloPersonRow[] };
+  return data.people || data.contacts || [];
+}
+
 const SENIORITY_RANK: Record<string, number> = {
   "owner": 7, "founder": 7, "c_suite": 5, "vp": 4, "head": 4, "director": 3, "senior": 2, "manager": 1, "individual_contributor": 0,
 };
 
+// Titles that LOOK like decision-makers but aren't — exclude entirely.
+// Examples: "Franchise Owner" owns a single franchise outlet (not the company).
+// "Founder's Office" is an EA / chief-of-staff role, not the founder themselves.
+const EXCLUDE_TITLE_PATTERNS = [
+  /\bfranchis(e|ee|or)\b/,
+  /\bfranchise\s+(owner|partner|holder)\b/,
+  /\bfounders?'?\s*office\b/,
+  /\boffice\s+of\s+(the\s+)?(founder|ceo|chairman|md)\b/,
+  /\bchief\s+of\s+staff\b/,
+  /\b(executive|personal)\s+assistant\b/,
+  /\bea\s+to\s+(the\s+)?(ceo|founder|md|chairman)\b/,
+  /\bsecretary\s+to\s+(the\s+)?(ceo|founder|md|chairman)\b/,
+  /\bintern\b/,
+  /\btrainee\b/,
+  /\bowner\s*[-–]\s*franchise\b/,
+];
+
+function isExcludedTitle(lt: string): boolean {
+  return EXCLUDE_TITLE_PATTERNS.some((p) => p.test(lt));
+}
+
 function strongerTitle(t: string): number {
   const lt = t.toLowerCase();
+  if (isExcludedTitle(lt)) return 0;
   if (/\b(founder|co[- ]?founder|cofounder)\b/.test(lt)) return 14;
   if (/\b(ceo|chief executive officer)\b/.test(lt)) return 13;
   if (/\b(coo|cto|cfo|chief operating officer|chief technology officer|chief financial officer)\b/.test(lt)) return 11;
@@ -104,6 +196,7 @@ function strongerTitle(t: string): number {
 
 function tierFor(title: string): string {
   const lt = (title || "").toLowerCase();
+  if (isExcludedTitle(lt)) return "excluded";
   if (/\b(founder|co[- ]?founder|cofounder)\b/.test(lt)) return "founder";
   if (/\b(ceo|chief executive)\b/.test(lt)) return "CEO";
   if (/\bchief\b/.test(lt) || /\b(coo|cto|cfo|cmo|cpo|cgo|cro)\b/.test(lt)) return "chief-level";
@@ -218,7 +311,45 @@ export async function stakeholderAgent(input: StakeholderInput): Promise<{ outpu
     const accountStakeholders: Stakeholder[] = [];
     if (live) {
       try {
-        const people = await searchPeopleApollo(acc.domain, searchTitles, apiKey, input.signal);
+        let people = await searchPeopleApollo(acc.domain, searchTitles, apiKey, input.signal);
+        // Strict-match: only keep people whose organization.primary_domain matches acc.domain
+        // exactly. Apollo's q_organization_domains_list can leak adjacent orgs (libas.in
+        // bringing back leads from libaas.in / libasify.com). Same defect we fixed for
+        // CoreSignal, now applied to Apollo too.
+        const filtered = filterPeopleByDomain(people, acc.domain);
+        if (filtered.rejected.length > 0) {
+          const reasonCounts = new Map<string, number>();
+          for (const r of filtered.rejected) reasonCounts.set(r.reason, (reasonCounts.get(r.reason) || 0) + 1);
+          const reasonSummary = Array.from(reasonCounts.entries()).map(([k, v]) => `${k}=${v}`).join(", ");
+          const samples = filtered.rejected.slice(0, 5).map((r) => `${r.person.name || "?"}@${r.orgDomain || "(no org)"}`).join(", ");
+          log.push(`Strict-match reject for ${acc.domain}: dropped ${filtered.rejected.length}/${people.length} person(s). Reasons: ${reasonSummary}. Samples: ${samples}.`);
+        }
+        people = filtered.kept;
+        // If Apollo's domain index doesn't have this org (common for sub-brands like
+        // bikewale.com, libas.in), retry by company-name keyword — BUT ONLY when we have
+        // a real, Apollo-verified company name. When acc.name is empty, that means this is
+        // an operator-typed stub (no Apollo data at all), and running a fuzzy name-search
+        // with a domain-derived name would pull leads from adjacent companies. Strict-stick
+        // means: no name = no fuzzy expansion = honest zero leads.
+        if (people.length === 0 && acc.name) {
+          try {
+            const byName = await searchPeopleByCompanyName(acc.name, searchTitles, apiKey, input.signal);
+            if (byName.length > 0) {
+              const filteredByName = filterPeopleByDomain(byName, acc.domain);
+              if (filteredByName.kept.length > 0) {
+                log.push(`Domain miss for ${acc.domain} — recovered ${filteredByName.kept.length}/${byName.length} via name="${acc.name}" (rejected ${filteredByName.rejected.length} adjacent orgs).`);
+                people = filteredByName.kept;
+              } else {
+                const sampleRejects = filteredByName.rejected.slice(0, 5).map((r) => `${r.person.name || "?"}@${r.orgDomain || "(no org)"}`).join(", ");
+                log.push(`Name search "${acc.name}" returned ${byName.length} candidate(s) but ALL rejected — none had primary_domain=${acc.domain}. Samples: ${sampleRejects}.`);
+              }
+            }
+          } catch (err) {
+            log.push(`Name-search fallback failed for ${acc.domain}: ${err instanceof Error ? err.message : "unknown"}`);
+          }
+        } else if (people.length === 0 && !acc.name) {
+          log.push(`Strict-stick: ${acc.domain} not in Apollo's domain index AND no verified company name available → skipping fuzzy name-search to prevent adjacent-org contamination. Honest result: 0 leads for this account.`);
+        }
         const picks = pickTopN(people, LEADS_PER_ACCOUNT);
         for (const pick of picks) {
           const p = pick.person;

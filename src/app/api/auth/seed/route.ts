@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/mongodb";
 import UserModel from "@/lib/models/user";
 import DeletedSeedEmail from "@/lib/models/deleted-seed-email";
 import bcrypt from "bcryptjs";
-import { SEED_USERS, reconcileRoleFromSeed } from "@/lib/seed-users";
+import { SEED_USERS, REMOVED_SEED_EMAILS, reconcileRoleFromSeed } from "@/lib/seed-users";
 
 export async function POST() {
   await connectDB();
@@ -11,8 +11,21 @@ export async function POST() {
   let reconciled = 0;
   let skipped = 0;
   let tombstoned = 0;
+  let purged = 0;
 
   let passwordsInstalled = 0;
+
+  for (const rawEmail of REMOVED_SEED_EMAILS) {
+    const email = rawEmail.toLowerCase().trim();
+    if (!email) continue;
+    const existed = await UserModel.findOneAndDelete({ email }).lean<{ email?: string }>();
+    if (existed) purged++;
+    await DeletedSeedEmail.updateOne(
+      { email },
+      { $set: { email, deletedAt: new Date(), deletedBy: "system:removed-seed" } },
+      { upsert: true },
+    );
+  }
 
   const tombstoneDocs = await DeletedSeedEmail.find({}).select("email").lean<{ email: string }[]>();
   const tombstones = new Set(tombstoneDocs.map((d) => (d.email || "").toLowerCase()));
@@ -49,5 +62,5 @@ export async function POST() {
     created++;
   }
 
-  return NextResponse.json({ created, reconciled, skipped, passwordsInstalled, tombstoned });
+  return NextResponse.json({ created, reconciled, skipped, passwordsInstalled, tombstoned, purged });
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Play, Loader2, Download, Upload, FileText, Users, Sliders, BookOpen, Briefcase, Square, FlaskConical, AlertTriangle, Check, X, Sparkles, Search, AlertCircle } from "lucide-react";
+import { ArrowLeft, Play, Loader2, Download, Upload, FileText, Users, Sliders, BookOpen, Briefcase, Square, FlaskConical, AlertTriangle, Check, X, Sparkles, Search, AlertCircle, Shield, UserSearch } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import PhaseCard from "./phase-card";
 import LeadsTable from "./leads-table";
@@ -27,7 +27,7 @@ const PHASE_TITLES: Record<string, { title: string; agent: string; description: 
   export:      { number: 11, title: "Smartlead CSV",          agent: "export-agent",      description: "The final Smartlead-ready CSV." },
 };
 
-type Tab = "pipeline" | "inputs" | "brief" | "config" | "skill" | "accounts" | "leads" | "testLeads" | "agentAngle";
+type Tab = "pipeline" | "inputs" | "brief" | "config" | "skill" | "accounts" | "leads" | "testAccounts" | "testLeads" | "calibration";
 
 export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId: string; onBack: () => void; canEdit: boolean }) {
   const { user } = useAuth();
@@ -114,7 +114,7 @@ export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId:
     } finally { setBusy(false); }
   }
 
-  async function startRun(opts: { stopAfter?: string; startFrom?: string; testLimit?: number; phase8AccountLimit?: number; forceRegenerate?: boolean; accountLimit?: number; personalize?: boolean } = {}) {
+  async function startRun(opts: { stopAfter?: string; startFrom?: string; testLimit?: number; phase8AccountLimit?: number; forceRegenerate?: boolean; accountLimit?: number; personalize?: boolean; coreSignalOnly?: boolean; accountOffset?: number; accountDomains?: string[] } = {}) {
     if (!user) return;
     setBusy(true); setErr(null);
     setJustTriggeredAt(Date.now());
@@ -145,6 +145,9 @@ export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId:
           ...(opts.forceRegenerate ? { forceRegenerate: true } : {}),
           ...(opts.accountLimit ? { accountLimit: opts.accountLimit } : {}),
           ...(opts.personalize ? { personalize: true } : {}),
+          ...(opts.coreSignalOnly ? { coreSignalOnly: true } : {}),
+          ...(opts.accountOffset ? { accountOffset: opts.accountOffset } : {}),
+          ...(opts.accountDomains && opts.accountDomains.length > 0 ? { accountDomains: opts.accountDomains } : {}),
         }),
       });
       if (!res.ok) {
@@ -260,13 +263,24 @@ export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId:
           <TabButton active={tab === "skill"} onClick={() => setTab("skill")} icon={<BookOpen size={13} />}>SKILL.md</TabButton>
           <TabButton active={tab === "accounts"} onClick={() => setTab("accounts")} icon={<FileText size={13} />}>Accounts <span className="ml-1 text-[10px] text-slate-400">({data.accounts.length})</span></TabButton>
           <TabButton active={tab === "leads"} onClick={() => setTab("leads")} icon={<Users size={13} />}>Leads <span className="ml-1 text-[10px] text-slate-400">({data.leads.length})</span></TabButton>
-          <TabButton active={tab === "agentAngle"} onClick={() => setTab("agentAngle")} icon={<Sparkles size={13} />}>
-            <span className="text-violet-700">Agent angle</span>
+          {/* Test workflow — was previously 4 cluttered tabs (agentAngle / calibration /
+              leadIntel / testLeads). Collapsed to 2: Test accounts (research → run) and
+              Test leads (results with full per-lead research). Calibration moved to the
+              settings gear in the header. */}
+          <TabButton active={tab === "testAccounts"} onClick={() => setTab("testAccounts")} icon={<UserSearch size={13} />}>
+            <span className="text-sky-700">Test accounts</span>
           </TabButton>
           <TabButton active={tab === "testLeads"} onClick={() => setTab("testLeads")} icon={<FlaskConical size={13} />}>
             <span className="text-amber-700">Test leads</span>
             <span className="ml-1 text-[10px] text-slate-400">({data.testLeads?.length || 0})</span>
           </TabButton>
+          <button
+            onClick={() => setTab("calibration")}
+            title="Calibration & audit"
+            className={`ml-auto inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium ${tab === "calibration" ? "bg-emerald-100 text-emerald-800 border border-emerald-300" : "text-slate-500 hover:text-slate-800 hover:bg-slate-100"}`}
+          >
+            <Shield size={13} /> Calibration
+          </button>
         </div>
 
         {tab === "pipeline" && (
@@ -395,19 +409,25 @@ export default function PilotDetailView({ pilotId, onBack, canEdit }: { pilotId:
           </div>
         )}
 
-        {tab === "agentAngle" && (
-          <AgentAngleTab
-            leads={data.leads}
-            testLeads={data.testLeads || []}
-            canEdit={canEdit}
+        {tab === "calibration" && (
+          <CalibrationTab pilotId={pilotId} canEdit={canEdit} />
+        )}
+
+        {tab === "testAccounts" && (
+          <TestAccountsTab
             running={running || busy}
-            onRegenerate={() => {
-              if (!confirm(`Re-run Phase 8 (research) + Phase 9 (draft) on the top 60 production accounts?\n\nWhat happens:\n• Claude planner picks per-account Tavily queries + Apify configs\n• Apify scrapes LinkedIn (company + jobs + named stakeholders)\n• Tavily site-targeted searches against Indian press\n• Sonnet synthesizes per-account observation + buying hypothesis\n• Phase 9 rebuilds claudePrompt for affected leads\n\nCost: ~$2-4 in Apify + Claude credits.\nRuntime: ~5-8 min for 60 accounts.\n\nProceed?`)) return;
-              startRun({ startFrom: "research", phase8AccountLimit: 60, forceRegenerate: true, personalize: true });
-            }}
             onTest5x5={() => {
-              if (!confirm(`Run a full pipeline FROM SCRATCH on 5 accounts × 5 ICPs = up to 25 leads.\n\nIsolation: writes to the __test bucket. Your production Leads tab (60+ leads) stays completely untouched.\n\nWhat happens (phases 1 → 11):\n  1-3. Ingest, filter, subset (test-mode subset)\n  4. Apollo enrich (5 accounts)\n  5. Score (top 5)\n  6. Stakeholder discovery — up to 5 ICPs per account (founder/CEO/CMO/CTO/etc.) = up to 25 leads\n  7. Email match (Apollo bulk)\n  8. Per-account research (Tavily + Apify + Claude) PLUS per-lead personalize (Apify LinkedIn + Haiku synthesis): observation angle, top pain, value angle, social angle, evidence, person evidence, ICP role\n  9-10. Compile prompts + validate\n  11. Export Smartlead CSV\n\nIf a pipeline is already running, STOP it first (Stop button in header, or Force unstick if stale).\n\nCost: ~$2-3 in Apollo + Apify + Claude credits.\nRuntime: ~5-8 min.\n\nResults appear in this Agent angle tab — toggle to "Test bucket" to see them.\n\nProceed?`)) return;
+              if (!confirm(`Run a full pipeline on 5 accounts × 5 ICPs = up to 25 test leads.\n\nIsolated to the test bucket. Your production Leads tab is untouched.\n\nCost: ~$2-3. Runtime: ~5-8 min.\n\nProceed?`)) return;
               startRun({ testLimit: 5, personalize: true, forceRegenerate: true });
+            }}
+            onTestCoreSignal={() => {
+              if (!confirm(`CoreSignal-only test on 5 NEW accounts (skipping the previously-tested top 5).\n\nDecision-makers only: CEO, Director, VP, Head.\nWrites to __test bucket. Runtime: ~3-5 min.\n\nProceed?`)) return;
+              startRun({ testLimit: 5, accountOffset: 5, personalize: true, forceRegenerate: true, coreSignalOnly: true });
+            }}
+            onRunDomains={(domains) => {
+              if (domains.length === 0) return;
+              if (!confirm(`Run on these ${domains.length} specific domain${domains.length === 1 ? "" : "s"}:\n\n${domains.map((d) => `• ${d}`).join("\n")}\n\nWrites to __test bucket. Runtime: ~2-4 min.\n\nProceed?`)) return;
+              startRun({ testLimit: domains.length, personalize: true, forceRegenerate: true, coreSignalOnly: true, accountDomains: domains });
             }}
           />
         )}
@@ -463,10 +483,22 @@ function BucketToggle({ bucket, setBucket, prodCount, testCount }: { bucket: "pr
   );
 }
 
-function AgentAngleTab({ leads, testLeads, canEdit, running, onRegenerate, onTest5x5 }: { leads: import("./types").PilotLeadRow[]; testLeads: import("./types").PilotLeadRow[]; canEdit: boolean; running: boolean; onRegenerate: () => void; onTest5x5: () => void }) {
+function AgentAngleTab({ leads, testLeads, canEdit, running, onRegenerate, onTest5x5, onTestCoreSignal, onRunDomains }: { leads: import("./types").PilotLeadRow[]; testLeads: import("./types").PilotLeadRow[]; canEdit: boolean; running: boolean; onRegenerate: () => void; onTest5x5: () => void; onTestCoreSignal: () => void; onRunDomains: (domains: string[]) => void }) {
   const [search, setSearch] = useState("");
   const [bucket, setBucket] = useState<"prod" | "test">(testLeads.length > 0 ? "test" : "prod");
   const activeLeads = bucket === "test" ? testLeads : leads;
+  const [customDomains, setCustomDomains] = useState("");
+  const [customOpen, setCustomOpen] = useState(false);
+
+  function parseAndRunDomains() {
+    const list = customDomains
+      .split(/[\s,]+/)
+      .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, ""))
+      .filter((d) => d.length > 0 && d.includes("."));
+    const unique = Array.from(new Set(list));
+    if (unique.length === 0) return;
+    onRunDomains(unique);
+  }
 
   const grouped = useMemo(() => {
     const map = new Map<string, import("./types").PilotLeadRow[]>();
@@ -580,6 +612,22 @@ function AgentAngleTab({ leads, testLeads, canEdit, running, onRegenerate, onTes
               <Play size={12} /> Test 5×5 (25 leads)
             </button>
             <button
+              onClick={onTestCoreSignal}
+              disabled={running}
+              title={running ? "Pipeline is running" : "CoreSignal-only run on next 5 accounts (decision-makers only)"}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-md whitespace-nowrap"
+            >
+              <Play size={12} /> Test 5 (CoreSignal · DM)
+            </button>
+            <button
+              onClick={() => setCustomOpen((v) => !v)}
+              disabled={running}
+              title="Run on a specific list of domains"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-xs font-semibold rounded-md whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Play size={12} /> Run on specific domains
+            </button>
+            <button
               onClick={onRegenerate}
               disabled={running}
               title={running ? "Pipeline is running" : "Regenerate observations + personalization on top 60 accounts"}
@@ -591,6 +639,38 @@ function AgentAngleTab({ leads, testLeads, canEdit, running, onRegenerate, onTes
         )}
         </div>
       </div>
+
+      {customOpen && canEdit && (
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold text-slate-700">Run on specific domains (CoreSignal · decision-makers)</p>
+            <button onClick={() => setCustomOpen(false)} className="text-slate-400 hover:text-slate-700 text-xs">close</button>
+          </div>
+          <p className="text-[11px] text-slate-500">Paste up to 50 domains, one per line or comma-separated. Writes to the __test bucket. Production data stays untouched.</p>
+          <textarea
+            value={customDomains}
+            onChange={(e) => setCustomDomains(e.target.value)}
+            placeholder="gadgets360.com&#10;blinkit.com&#10;sonyliv.com"
+            rows={5}
+            className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded bg-white focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10 resize-y"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={parseAndRunDomains}
+              disabled={running || customDomains.trim().length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold rounded-md"
+            >
+              <Play size={12} /> Run on these domains
+            </button>
+            <button
+              onClick={() => setCustomDomains("gadgets360.com\nblinkit.com\nsonyliv.com")}
+              className="text-[11px] text-[#6800FF] hover:underline"
+            >
+              fill example (gadgets360, blinkit, sonyliv)
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
         <StatTile label="Accounts" value={String(stats.totalAccounts)} />
@@ -1005,6 +1085,657 @@ function TabButton({ children, active, onClick, icon }: { children: React.ReactN
     <button onClick={onClick} className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors ${active ? "text-[#6800FF] border-[#6800FF]" : "text-slate-500 border-transparent hover:text-slate-800"}`}>
       {icon} {children}
     </button>
+  );
+}
+
+interface CalibrationSnapshot {
+  skillVersion: string;
+  sellerName: string;
+  apifyDisabled: boolean;
+  coreSignalTierAOnly: boolean;
+  coreSignalCreditsBudget: number;
+  bucketThresholds: number[];
+  competitorPenaltyDirect: number;
+  competitorPenaltyAdjacent: number;
+  fiscalCalendarMultiplier: number;
+  fiscalCalendarWindow: string;
+  socialProofLibrarySize: number;
+  exclusionGroupCount: number;
+  intentSignalWeights: Record<string, number>;
+  capturedAt: string;
+}
+interface QuarterlyItem { item: string; lastReviewedAt: string | null; reviewer?: string; daysSince: number | null; dueIn: number; overdue: boolean }
+interface LoopFinding { loop: number; title: string; observation: string; recommendation: string; severity: "info" | "watch" | "action"; evidence: Record<string, unknown> }
+interface ReviewDigest { generatedAt: string; windowDays: number; outcomesAnalysed: number; findings: LoopFinding[]; rawSummary: Record<string, number> }
+interface SignOffLatest { id: string; reviewer: string; notes: string; skillVersion: string; signedAt: string }
+
+function CalibrationTab({ pilotId, canEdit }: { pilotId: string; canEdit: boolean }) {
+  const { user } = useAuth();
+  const [snapshot, setSnapshot] = useState<CalibrationSnapshot | null>(null);
+  const [signOffLatest, setSignOffLatest] = useState<SignOffLatest | null>(null);
+  const [quarterly, setQuarterly] = useState<{ status: QuarterlyItem[]; overdue: string[]; quarterDays: number } | null>(null);
+  const [digest, setDigest] = useState<ReviewDigest | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [signOffNotes, setSignOffNotes] = useState("");
+  const [seedRun, setSeedRun] = useState<{ totalSamples: number; passed: number; failed: number; results: Array<{ id: string; passed: boolean; checks: Array<{ name: string; passed: boolean; detail: string }> }> } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [snapRes, signRes, qRes] = await Promise.all([
+          fetch(`/api/outbound/audit/calibration?pilotId=${encodeURIComponent(pilotId)}`),
+          fetch(`/api/outbound/audit/sign-off?pilotId=${encodeURIComponent(pilotId)}`),
+          fetch(`/api/outbound/audit/quarterly`),
+        ]);
+        if (snapRes.ok) {
+          const d = await snapRes.json();
+          if (!cancelled) setSnapshot(d.snapshot);
+        }
+        if (signRes.ok) {
+          const d = await signRes.json();
+          if (!cancelled) setSignOffLatest(d.latest);
+        }
+        if (qRes.ok) {
+          const d = await qRes.json();
+          if (!cancelled) setQuarterly(d);
+        }
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [pilotId]);
+
+  async function signOff() {
+    if (!user?.email) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/outbound/audit/sign-off`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewer: user.email, pilotId, notes: signOffNotes }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setSignOffLatest({ id: d.id, reviewer: user.email.toLowerCase(), notes: signOffNotes, skillVersion: d.snapshot.skillVersion, signedAt: new Date().toISOString() });
+        setSignOffNotes("");
+      }
+    } catch {}
+    setBusy(false);
+  }
+
+  async function markQuarterly(item: string) {
+    if (!user?.email) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/outbound/audit/quarterly`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewer: user.email, item, notes: "" }),
+      });
+      if (res.ok) {
+        const qRes = await fetch(`/api/outbound/audit/quarterly`);
+        if (qRes.ok) setQuarterly(await qRes.json());
+      }
+    } catch {}
+    setBusy(false);
+  }
+
+  async function runLoop() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/outbound/audit/loop?windowDays=28&pilotId=${encodeURIComponent(pilotId)}`);
+      if (res.ok) {
+        const d = await res.json();
+        setDigest(d.digest);
+      }
+    } catch {}
+    setBusy(false);
+  }
+
+  async function runSeedTest() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/outbound/audit/seed-test`);
+      if (res.ok) {
+        const d = await res.json();
+        setSeedRun(d.run);
+      }
+    } catch {}
+    setBusy(false);
+  }
+
+  if (!snapshot) return <div className="text-sm text-slate-500">Loading calibration overlay…</div>;
+
+  const sevColor = (s: string) => s === "action" ? "text-red-700 bg-red-50 border-red-200" : s === "watch" ? "text-amber-700 bg-amber-50 border-amber-200" : "text-emerald-700 bg-emerald-50 border-emerald-200";
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-linear-to-br from-emerald-50 to-white border border-emerald-200 rounded-xl p-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Calibration overlay (V-VWO {snapshot.skillVersion})</p>
+            <p className="text-sm text-slate-700 mt-0.5">Snapshot of all VWO_CLIENT_SKILL.md rules active right now. Persisted with every campaign run.</p>
+          </div>
+          <span className="text-[10px] text-slate-500 font-mono">captured: {new Date(snapshot.capturedAt).toLocaleString()}</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
+          <CalibChip label="Apify" value={snapshot.apifyDisabled ? "disabled (VWO policy)" : "enabled"} ok={snapshot.apifyDisabled} />
+          <CalibChip label="CoreSignal Tier" value={snapshot.coreSignalTierAOnly ? "Tier A only" : "all leads"} ok={snapshot.coreSignalTierAOnly} />
+          <CalibChip label="CoreSignal budget" value={`${snapshot.coreSignalCreditsBudget} credits/run`} />
+          <CalibChip label="Bucket thresholds" value={snapshot.bucketThresholds.join(" / ")} />
+          <CalibChip label="Direct competitor penalty" value={`×${snapshot.competitorPenaltyDirect}`} />
+          <CalibChip label="Adjacent competitor penalty" value={`×${snapshot.competitorPenaltyAdjacent}`} />
+          <CalibChip label="Fiscal window" value={`${snapshot.fiscalCalendarWindow} (×${snapshot.fiscalCalendarMultiplier})`} ok={snapshot.fiscalCalendarMultiplier === 1.0} />
+          <CalibChip label="Social proof library" value={`${snapshot.socialProofLibrarySize} brands`} />
+          <CalibChip label="Exclusion groups" value={`${snapshot.exclusionGroupCount} groups`} />
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600">Gate I-1 — Campaign sign-off</p>
+          {signOffLatest ? (
+            <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">Last signed: {new Date(signOffLatest.signedAt).toLocaleString()} by {signOffLatest.reviewer}</span>
+          ) : (
+            <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">No sign-off recorded</span>
+          )}
+        </div>
+        <p className="text-xs text-slate-500 mb-2">Operator confirms the calibration above matches VWO&apos;s reality before any campaign launches.</p>
+        {canEdit && (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={signOffNotes}
+              onChange={(e) => setSignOffNotes(e.target.value)}
+              placeholder="Notes (optional)"
+              className="flex-1 px-3 py-1.5 text-xs border border-slate-200 rounded"
+            />
+            <button onClick={signOff} disabled={busy} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-semibold rounded">Sign off (I-1)</button>
+          </div>
+        )}
+      </div>
+
+      {quarterly && (
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600">Gate I-3 — Quarterly audit ({quarterly.quarterDays}d cycle)</p>
+            {quarterly.overdue.length > 0 && (
+              <span className="text-[10px] text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">{quarterly.overdue.length} overdue</span>
+            )}
+          </div>
+          <div className="space-y-1">
+            {quarterly.status.map((s) => (
+              <div key={s.item} className="flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded bg-slate-50">
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-800">{s.item.replace(/_/g, " ")}</p>
+                  <p className="text-[10px] text-slate-500">{s.lastReviewedAt ? `last: ${new Date(s.lastReviewedAt).toLocaleDateString()} by ${s.reviewer}` : "never reviewed"}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-semibold ${s.overdue ? "text-red-700" : s.dueIn < 14 ? "text-amber-700" : "text-emerald-700"}`}>
+                    {s.overdue ? `overdue by ${Math.abs(s.dueIn)}d` : `due in ${s.dueIn}d`}
+                  </span>
+                  {canEdit && <button onClick={() => markQuarterly(s.item)} disabled={busy} className="px-2 py-1 bg-white border border-slate-300 hover:bg-slate-100 disabled:opacity-40 text-[10px] font-semibold rounded">Mark reviewed</button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600">Operator review loop (6 sub-loops)</p>
+          <div className="flex gap-2">
+            <button onClick={runLoop} disabled={busy} className="px-3 py-1.5 bg-[#6800FF] hover:bg-[#5800DD] disabled:opacity-40 text-white text-xs font-semibold rounded">Run review (28-day window)</button>
+            <a href={`/api/outbound/audit/outcomes?format=csv&pilotId=${encodeURIComponent(pilotId)}`} className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-xs font-semibold rounded inline-flex items-center gap-1"><Download size={11} /> outcomes.csv</a>
+          </div>
+        </div>
+        {digest && (
+          <div className="space-y-2">
+            <p className="text-[11px] text-slate-500">{digest.outcomesAnalysed} runs analysed · generated {new Date(digest.generatedAt).toLocaleString()}</p>
+            {digest.findings.map((f, i) => (
+              <div key={i} className={`px-3 py-2 rounded border text-xs ${sevColor(f.severity)}`}>
+                <p className="font-semibold">Loop {f.loop} — {f.title}</p>
+                <p className="mt-0.5 text-[11px] opacity-90">{f.observation}</p>
+                <p className="mt-1 text-[11px] font-medium">→ {f.recommendation}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-600">Validation seed (regression test)</p>
+          <button onClick={runSeedTest} disabled={busy} className="px-3 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-40 text-xs font-semibold rounded">Run seed test</button>
+        </div>
+        {seedRun && (
+          <div className="space-y-1">
+            <p className="text-xs">{seedRun.passed}/{seedRun.totalSamples} samples passed{seedRun.failed > 0 ? ` · ${seedRun.failed} failed` : ""}</p>
+            {seedRun.results.map((r) => (
+              <div key={r.id} className={`text-[11px] px-2 py-1.5 rounded border ${r.passed ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-red-50 border-red-200 text-red-800"}`}>
+                <p className="font-semibold">{r.id} — {r.passed ? "✓ pass" : "✗ fail"}</p>
+                {!r.passed && (
+                  <ul className="list-disc list-inside mt-0.5">
+                    {r.checks.filter((c) => !c.passed).map((c, j) => <li key={j}>{c.name}: {c.detail}</li>)}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CalibChip({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
+  return (
+    <div className={`px-2 py-1.5 rounded border text-[11px] ${ok === true ? "bg-emerald-50 border-emerald-200 text-emerald-800" : ok === false ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-slate-50 border-slate-200 text-slate-700"}`}>
+      <p className="text-[9px] font-semibold uppercase tracking-wider opacity-70">{label}</p>
+      <p className="font-semibold mt-0.5">{value}</p>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────────
+// Lead intel tab — operator pastes account domains, we hit CoreSignal directly,
+// and surface decision-makers with their FULL LinkedIn activity (posts, shares,
+// articles, comments). This is research/exploration, separate from the pipeline.
+// Operator reads each post and writes a hand-tailored email per person.
+// ────────────────────────────────────────────────────────────────────────────────
+
+interface LeadIntelMember {
+  id: string | number;
+  fullName?: string;
+  title?: string;
+  headline?: string;
+  location?: string;
+  linkedinUrl?: string;
+  monthsInCurrentRole?: number;
+  startedCurrentRoleAt?: string;
+  skills?: string[];
+  educationSummary?: string;
+  previousCompanies?: Array<{ company?: string; title?: string; from?: string; to?: string }>;
+  recentActivity: Array<{ kind: string; text: string; postedAt?: string; engagement?: number }>;
+}
+
+interface LeadIntelAccount {
+  domain: string;
+  companyId: string | number | null;
+  companyName?: string;
+  companyIndustry?: string;
+  companyEmployees?: number;
+  members: LeadIntelMember[];
+  errors: string[];
+  triedFilters: string[];
+  endpointUsed?: string;
+  candidatesTotal?: number;
+  candidatesChecked?: number;
+  rejectedCandidates?: Array<{ id: string | number; website?: string; name?: string }>;
+}
+
+interface LeadIntelResponse {
+  accounts: LeadIntelAccount[];
+  summary: { domains: number; members: number; posts: number; creditsUsed: number; elapsedMs: number };
+}
+
+// Test accounts tab — single entry-point for all test/research workflows.
+// Top: kick off a test run (3 modes: full pipeline, CoreSignal-only, specific domains).
+// Bottom: Lead intel — paste domains, see decision-makers + their LinkedIn/press signals
+// before committing to a full pipeline run. Replaces the old "Agent angle" + "Lead intel"
+// tab pair.
+function TestAccountsTab({
+  running,
+  onTest5x5,
+  onTestCoreSignal,
+  onRunDomains,
+}: {
+  running: boolean;
+  onTest5x5: () => void;
+  onTestCoreSignal: () => void;
+  onRunDomains: (domains: string[]) => void;
+}) {
+  const [customDomains, setCustomDomains] = useState("");
+
+  function parseAndRunDomains() {
+    const list = customDomains
+      .split(/[\s,]+/)
+      .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, ""))
+      .filter((d) => d.length > 0 && d.includes("."));
+    const unique = Array.from(new Set(list));
+    if (unique.length === 0) return;
+    onRunDomains(unique);
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Run-a-test panel */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="font-bold text-slate-900 text-sm">Run a test</h2>
+            <p className="text-[11px] text-slate-600 mt-0.5">
+              Three test modes — all isolated to the test bucket. Production data stays untouched.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="border border-slate-200 rounded-lg p-3 space-y-2">
+            <h3 className="font-semibold text-slate-900 text-xs">1. Full pipeline test</h3>
+            <p className="text-[10px] text-slate-600 leading-relaxed">5 accounts × 5 ICPs = up to 25 leads. All sources (Apollo + Tavily + CoreSignal + press). ~$2-3, ~5-8 min.</p>
+            <button
+              onClick={onTest5x5}
+              disabled={running}
+              className="w-full px-3 py-1.5 bg-violet-600 text-white rounded-md text-xs font-semibold hover:bg-violet-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+            >
+              {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+              Test 5×5
+            </button>
+          </div>
+
+          <div className="border border-slate-200 rounded-lg p-3 space-y-2">
+            <h3 className="font-semibold text-slate-900 text-xs">2. CoreSignal-only test</h3>
+            <p className="text-[10px] text-slate-600 leading-relaxed">5 NEW accounts (skips top 5). Decision-makers only. Apollo + CoreSignal, no Tavily. ~3-5 min.</p>
+            <button
+              onClick={onTestCoreSignal}
+              disabled={running}
+              className="w-full px-3 py-1.5 bg-emerald-600 text-white rounded-md text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+            >
+              {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+              Test CoreSignal · DM
+            </button>
+          </div>
+
+          <div className="border border-slate-200 rounded-lg p-3 space-y-2">
+            <h3 className="font-semibold text-slate-900 text-xs">3. Run on specific domains</h3>
+            <p className="text-[10px] text-slate-600 leading-relaxed">Paste up to 25 domains. Strict company match — adjacent orgs auto-rejected.</p>
+            <textarea
+              value={customDomains}
+              onChange={(e) => setCustomDomains(e.target.value)}
+              placeholder={"blinkit.com\nbikewale.com\nlibas.in"}
+              className="w-full h-20 rounded-md border border-slate-300 px-2 py-1 text-[11px] font-mono"
+              disabled={running}
+            />
+            <button
+              onClick={parseAndRunDomains}
+              disabled={running || customDomains.trim().length === 0}
+              className="w-full px-3 py-1.5 bg-sky-600 text-white rounded-md text-xs font-semibold hover:bg-sky-700 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+            >
+              {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+              Run on these domains
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Lead intel — research a specific account before running */}
+      <div>
+        <div className="flex items-baseline gap-2 mb-2">
+          <h2 className="font-bold text-slate-900 text-sm">Inspect an account before you run</h2>
+          <p className="text-[11px] text-slate-600">Pull decision-makers + their LinkedIn activity from CoreSignal directly — read what they actually post about, then decide whether to run the full pipeline.</p>
+        </div>
+        <LeadIntelTab />
+      </div>
+    </div>
+  );
+}
+
+function LeadIntelTab() {
+  const [domainsRaw, setDomainsRaw] = useState("");
+  const [titlesRaw, setTitlesRaw] = useState("CEO, Founder, Co-Founder, Chief, Director, VP, Head, President, Managing Director");
+  const [maxMembers, setMaxMembers] = useState(5);
+  const [postLimit, setPostLimit] = useState(10);
+  const [busy, setBusy] = useState(false);
+  const [resp, setResp] = useState<LeadIntelResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    setResp(null);
+    try {
+      const domains = domainsRaw.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+      const titles = titlesRaw.split(/[,\n]+/).map((s) => s.trim()).filter(Boolean);
+      const r = await fetch("/api/outbound/coresignal/lookup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domains, titles, maxMembers, postLimitPerMember: postLimit }),
+      });
+      if (!r.ok) {
+        const errBody = await r.json().catch(() => ({ error: r.statusText }));
+        setError(typeof errBody.error === "string" ? errBody.error : `HTTP ${r.status}`);
+        return;
+      }
+      const data = await r.json() as LeadIntelResponse;
+      setResp(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "request failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-sky-50 border border-sky-200 rounded-lg px-3 py-2 text-xs text-sky-900 flex items-start gap-1.5">
+        <UserSearch size={13} className="mt-0.5 shrink-0" />
+        <span>
+          <strong>Lead intel</strong> — paste account domains, get decision-makers + their actual LinkedIn activity (posts, articles, comments) directly from CoreSignal. Use this to read what each person posts about and hand-craft a per-lead email. Separate from the main pipeline.
+        </span>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Account domains</label>
+            <textarea
+              value={domainsRaw}
+              onChange={(e) => setDomainsRaw(e.target.value)}
+              placeholder={"blinkit.com\nbikewale.com\nlibas.in"}
+              className="mt-1 w-full h-32 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+              disabled={busy}
+            />
+            <p className="mt-1 text-[10px] text-slate-500">One per line or comma-separated. Up to 25 domains per request.</p>
+          </div>
+          <div>
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Decision-maker title keywords</label>
+            <textarea
+              value={titlesRaw}
+              onChange={(e) => setTitlesRaw(e.target.value)}
+              className="mt-1 w-full h-32 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+              disabled={busy}
+            />
+            <p className="mt-1 text-[10px] text-slate-500">CoreSignal will filter members whose current title matches any of these. Comma-separated.</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-3 items-end">
+          <div>
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Max members per account</label>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={maxMembers}
+              onChange={(e) => setMaxMembers(Math.max(1, Math.min(20, Number(e.target.value) || 5)))}
+              className="mt-1 block w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              disabled={busy}
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">Posts per member</label>
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={postLimit}
+              onChange={(e) => setPostLimit(Math.max(1, Math.min(30, Number(e.target.value) || 10)))}
+              className="mt-1 block w-24 rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+              disabled={busy}
+            />
+          </div>
+          <button
+            onClick={run}
+            disabled={busy || domainsRaw.trim().length === 0}
+            className="px-4 py-2 bg-sky-600 text-white rounded-lg text-sm font-semibold hover:bg-sky-700 disabled:opacity-50 inline-flex items-center gap-1.5"
+          >
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+            {busy ? "Searching CoreSignal…" : "Find leads + activity"}
+          </button>
+          <p className="text-[10px] text-slate-500">Cost: ~1 credit per company + 1 credit per member collected.</p>
+        </div>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-800 flex items-start gap-2">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <span><strong>Error:</strong> {error}</span>
+        </div>
+      )}
+
+      {resp && (
+        <div className="space-y-4">
+          <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 flex flex-wrap gap-x-4 gap-y-1">
+            <span><strong>{resp.summary.domains}</strong> domains</span>
+            <span><strong>{resp.summary.members}</strong> members found</span>
+            <span><strong>{resp.summary.posts}</strong> posts/activity items</span>
+            <span><strong>{resp.summary.creditsUsed}</strong> credits used</span>
+            <span><strong>{(resp.summary.elapsedMs / 1000).toFixed(1)}s</strong> elapsed</span>
+          </div>
+
+          {resp.accounts.map((acc) => (
+            <LeadIntelAccountCard key={acc.domain} acc={acc} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LeadIntelAccountCard({ acc }: { acc: LeadIntelAccount }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+      <div className="bg-slate-50 border-b border-slate-200 px-4 py-3">
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="font-bold text-slate-900">{acc.companyName || acc.domain}</h3>
+            <p className="text-[11px] text-slate-600">
+              {acc.domain}
+              {acc.companyIndustry ? ` · ${acc.companyIndustry}` : ""}
+              {acc.companyEmployees ? ` · ${acc.companyEmployees.toLocaleString()} employees` : ""}
+              {acc.companyId != null ? ` · CoreSignal id ${acc.companyId}` : ""}
+            </p>
+          </div>
+          <div className="text-[10px] text-slate-500">
+            {acc.members.length} decision-makers · {acc.members.reduce((s, m) => s + m.recentActivity.length, 0)} posts
+          </div>
+        </div>
+        {(acc.errors.length > 0 || (acc.rejectedCandidates && acc.rejectedCandidates.length > 0)) && (
+          <details className="mt-2">
+            <summary className="cursor-pointer text-[10px] text-amber-700 font-semibold">
+              Diagnostics ({acc.errors.length} error{acc.errors.length === 1 ? "" : "s"}{acc.rejectedCandidates && acc.rejectedCandidates.length > 0 ? `, ${acc.rejectedCandidates.length} candidate${acc.rejectedCandidates.length === 1 ? "" : "s"} rejected` : ""})
+            </summary>
+            <div className="mt-1 text-[10px] text-amber-800 font-mono space-y-0.5 bg-amber-50 border border-amber-200 rounded p-2">
+              {acc.endpointUsed && <p>endpoint: {acc.endpointUsed}</p>}
+              {(acc.candidatesTotal != null && acc.candidatesTotal > 0) && (
+                <p>strict-match: {acc.candidatesTotal} candidate{acc.candidatesTotal === 1 ? "" : "s"} found, {acc.candidatesChecked} verified, {acc.companyId == null ? "ALL rejected (no exact website match)" : "1 matched"}</p>
+              )}
+              {acc.rejectedCandidates && acc.rejectedCandidates.length > 0 && (
+                <div className="mt-1">
+                  <p className="font-bold">Rejected candidates (website didn&apos;t match {acc.domain} exactly):</p>
+                  <ul className="ml-3">
+                    {acc.rejectedCandidates.map((r, i) => (
+                      <li key={i}>· id={String(r.id)} · {r.name || "?"} · website={r.website || "(none)"}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {acc.triedFilters.length > 0 && <p>tried: [{acc.triedFilters.join(", ")}]</p>}
+              {acc.errors.map((e, i) => <p key={i}>· {e}</p>)}
+            </div>
+          </details>
+        )}
+      </div>
+
+      {acc.members.length === 0 ? (
+        <div className="px-4 py-6 text-center text-xs text-slate-500 italic">
+          No decision-makers found at this company. {acc.errors.length > 0 ? "See diagnostics above." : ""}
+        </div>
+      ) : (
+        <div className="divide-y divide-slate-100">
+          {acc.members.map((m) => <LeadIntelMemberCard key={String(m.id)} m={m} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LeadIntelMemberCard({ m }: { m: LeadIntelMember }) {
+  return (
+    <div className="px-4 py-3 space-y-2">
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div>
+          <h4 className="font-semibold text-slate-900">{m.fullName || `Member ${m.id}`}</h4>
+          <p className="text-[11px] text-slate-600">
+            {m.title || "—"}
+            {m.monthsInCurrentRole ? ` · ${m.monthsInCurrentRole} months in role` : ""}
+            {m.location ? ` · ${m.location}` : ""}
+          </p>
+          {m.headline && m.headline !== m.title && (
+            <p className="text-[11px] text-slate-500 italic mt-0.5">"{m.headline.slice(0, 200)}{m.headline.length > 200 ? "…" : ""}"</p>
+          )}
+        </div>
+        {m.linkedinUrl && (
+          <a href={m.linkedinUrl.startsWith("http") ? m.linkedinUrl : `https://${m.linkedinUrl}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-blue-600 hover:underline shrink-0">
+            LinkedIn ↗
+          </a>
+        )}
+      </div>
+
+      {m.previousCompanies && m.previousCompanies.length > 0 && (
+        <div className="text-[10px] text-slate-600">
+          <span className="font-semibold">Previous:</span>{" "}
+          {m.previousCompanies.slice(0, 3).map((p, i) => (
+            <span key={i}>{i > 0 ? " · " : ""}{p.title || ""}{p.title && p.company ? " at " : ""}{p.company || ""}{p.from ? ` (${p.from}${p.to ? `–${p.to}` : "–present"})` : ""}</span>
+          ))}
+        </div>
+      )}
+
+      {m.educationSummary && (
+        <div className="text-[10px] text-slate-600"><span className="font-semibold">Education:</span> {m.educationSummary}</div>
+      )}
+
+      {m.skills && m.skills.length > 0 && (
+        <div className="text-[10px] text-slate-600"><span className="font-semibold">Skills:</span> {m.skills.slice(0, 8).join(", ")}</div>
+      )}
+
+      {m.recentActivity.length === 0 ? (
+        <div className="bg-slate-50 border border-slate-200 rounded px-2 py-1.5 text-[10px] text-slate-500 italic">
+          No LinkedIn posts/activity returned by CoreSignal for this person.
+        </div>
+      ) : (
+        <details open={m.recentActivity.length <= 3} className="bg-sky-50/40 border border-sky-200 rounded-lg p-2">
+          <summary className="cursor-pointer text-[11px] font-bold text-sky-900">
+            LinkedIn activity ({m.recentActivity.length} {m.recentActivity.length === 1 ? "item" : "items"})
+          </summary>
+          <ul className="mt-2 space-y-2">
+            {m.recentActivity.map((a, i) => (
+              <li key={i} className="bg-white border border-sky-100 rounded p-2 text-[11px] text-slate-800">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-sky-700">{a.kind}{a.postedAt ? ` · ${a.postedAt}` : ""}</span>
+                  {typeof a.engagement === "number" && a.engagement > 0 && (
+                    <span className="text-[9px] text-slate-500">{a.engagement.toLocaleString()} engagements</span>
+                  )}
+                </div>
+                <p className="whitespace-pre-wrap leading-relaxed">{a.text}</p>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
   );
 }
 

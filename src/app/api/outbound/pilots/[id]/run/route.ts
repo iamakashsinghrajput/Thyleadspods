@@ -24,6 +24,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const accountLimitRaw = Number(body.accountLimit);
   const accountLimit = Number.isFinite(accountLimitRaw) && accountLimitRaw > 0 ? Math.min(Math.floor(accountLimitRaw), 2000) : undefined;
   const personalize = body.personalize === true;
+  const coreSignalOnly = body.coreSignalOnly === true;
+  const accountOffsetRaw = Number(body.accountOffset);
+  const accountOffset = Number.isFinite(accountOffsetRaw) && accountOffsetRaw > 0 ? Math.min(Math.floor(accountOffsetRaw), 2000) : undefined;
+  const accountDomains = Array.isArray(body.accountDomains)
+    ? body.accountDomains.filter((d: unknown): d is string => typeof d === "string" && d.trim().length > 0).slice(0, 50)
+    : undefined;
 
   const exists = await OutboundPilot.findById(id).lean<{ _id: unknown; pilotName?: string; phases?: Array<{ key: string; status: string }> }>();
   if (!exists) return NextResponse.json({ error: "pilot not found" }, { status: 404 });
@@ -51,7 +57,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     updatedAt: new Date(),
   });
 
-  runPipelineSafe(id, { stopAfter, startFrom, testLimit, phase8AccountLimit, forceRegenerate, accountLimit, personalize }).catch(async (err) => {
+  runPipelineSafe(id, { stopAfter, startFrom, testLimit, phase8AccountLimit, forceRegenerate, accountLimit, personalize, coreSignalOnly, accountOffset, accountDomains }).catch(async (err) => {
     await OutboundPilot.findByIdAndUpdate(id, {
       status: "failed",
       updatedAt: new Date(),

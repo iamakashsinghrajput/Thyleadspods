@@ -34,10 +34,10 @@ const podColors = [
 ];
 
 const defaultPods: PodInfo[] = [
-  { id: "pod1", name: "Pod 1", members: ["Kunal", "Rajesh"], ...podColors[0] },
+  { id: "pod1", name: "Pod 1", members: ["Kunal", "Shruti"], ...podColors[0] },
   { id: "pod2", name: "Pod 2", members: ["Manshi", "Naman"], ...podColors[1] },
   { id: "pod3", name: "Pod 3", members: ["Krishna", "Mridul"], ...podColors[2] },
-  { id: "pod4", name: "Pod 4", members: ["Sandeep", "Rashi"], ...podColors[3] },
+  { id: "pod4", name: "Pod 4", members: ["Sandeep", "Pranesh"], ...podColors[3] },
 ];
 
 const PodContext = createContext<PodContextType | null>(null);
@@ -47,7 +47,7 @@ export function PodProvider({ children }: { children: React.ReactNode }) {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const PODS_VERSION = "v2";
+    const PODS_VERSION = "v4";
     try {
       if (localStorage.getItem("thyleads_pods_version") !== PODS_VERSION) {
         localStorage.removeItem("thyleads_pods");

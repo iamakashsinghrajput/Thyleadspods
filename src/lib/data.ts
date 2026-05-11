@@ -1,10 +1,10 @@
 import { Pod, ClientProject, PodId } from "@/types";
 
 export const pods: Pod[] = [
-  { id: "pod1", name: "Pod 1", members: ["Kunal", "Rajesh"] },
+  { id: "pod1", name: "Pod 1", members: ["Kunal", "Shruti"] },
   { id: "pod2", name: "Pod 2", members: ["Manshi", "Naman"] },
   { id: "pod3", name: "Pod 3", members: ["Krishna", "Mridul"] },
-  { id: "pod4", name: "Pod 4", members: ["Sandeep", "Rashi"] },
+  { id: "pod4", name: "Pod 4", members: ["Sandeep", "Pranesh"] },
 ];
 
 export const podMap: Record<PodId, Pod> = Object.fromEntries(

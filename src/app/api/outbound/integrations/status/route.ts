@@ -117,10 +117,14 @@ async function probeCoreSignal(): Promise<ProbeResult> {
 
   // 2. Key-validity probes against direct CoreSignal
   const validityProbes = [
+    "https://api.coresignal.com/cdapi/v2/credits",
+    "https://api.coresignal.com/cdapi/v1/credits",
     "https://api.coresignal.com/v1/credits",
+    "https://api.coresignal.com/v2/credits",
     "https://api.coresignal.com/credits",
     "https://api.coresignal.com/api/credits",
-    "https://api.coresignal.com/v2/credits",
+    "https://api.coresignal.com/cdapi/v2/account/credits",
+    "https://api.coresignal.com/cdapi/v1/account/credits",
   ];
   let keyValidStatus: number | null = null;
   let keyValidPath: string | null = null;
@@ -138,23 +142,27 @@ async function probeCoreSignal(): Promise<ProbeResult> {
     } catch {}
   }
 
-  const candidates = [
-    overrideBase ? `${overrideBase}/company_multi_source/search/filter` : "",
-    overrideBase ? `${overrideBase}/search/filter` : "",
-    "https://api.coresignal.com/cdapi/v2/company_multi_source/search/filter",
-    "https://api.coresignal.com/cdapi/v2/data_company_multi_source/search/filter",
-    "https://api.coresignal.com/cdapi/v2/professional_network_company/search/filter",
-    "https://api.coresignal.com/cdapi/v2/companies/search/filter",
-    "https://api.coresignal.com/v2/data_company_multi_source/search/filter",
-    "https://api.coresignal.com/v2/company_multi_source/search/filter",
-    "https://api.coresignal.com/v2/companies/search/filter",
-    "https://api.coresignal.com/cdapi/v1/professional_network/company/search/filter",
-    "https://api.coresignal.com/cdapi/v1/linkedin/company/search/filter",
-    "https://api.coresignal.com/cdapi/v1/linkedin_company/search/filter",
-    "https://api.coresignal.com/v1/companies/search/filter",
-    "https://api.coresignal.com/v1/linkedin/companies/search/filter",
-    "https://api-prod.coresignal.com/cdapi/v2/company_multi_source/search/filter",
-  ].filter(Boolean) as string[];
+  // Each entry: [url, body]. Try es_dsl-shaped body for /search/es_dsl, plain filter for /search/filter.
+  const esDslBody = { query: { bool: { must: [{ match: { website: "google.com" } }] } } };
+  const filterBody: Record<string, unknown> = { website: "google.com" };
+  const candidatesWithBody: Array<{ url: string; body: Record<string, unknown> }> = [
+    overrideBase ? { url: `${overrideBase}/search/es_dsl`, body: esDslBody } : null,
+    overrideBase ? { url: `${overrideBase}/search/filter`, body: filterBody } : null,
+    overrideBase ? { url: `${overrideBase}/company_base/search/es_dsl`, body: esDslBody } : null,
+    overrideBase ? { url: `${overrideBase}/company_multi_source/search/filter`, body: filterBody } : null,
+    { url: "https://api.coresignal.com/cdapi/v2/company_base/search/es_dsl", body: esDslBody },
+    { url: "https://api.coresignal.com/cdapi/v2/company_base/search/filter", body: filterBody },
+    { url: "https://api.coresignal.com/cdapi/v2/company_multi_source/search/filter", body: filterBody },
+    { url: "https://api.coresignal.com/cdapi/v2/company_multi_source/search/es_dsl", body: esDslBody },
+    { url: "https://api.coresignal.com/cdapi/v2/multi_source_company/search/filter", body: filterBody },
+    { url: "https://api.coresignal.com/cdapi/v2/professional_network_company/search/filter", body: filterBody },
+    { url: "https://api.coresignal.com/cdapi/v2/companies/search/filter", body: filterBody },
+    { url: "https://api.coresignal.com/cdapi/v1/multi_source/company/search/filter", body: filterBody },
+    { url: "https://api.coresignal.com/cdapi/v1/professional_network/company/search/filter", body: filterBody },
+    { url: "https://api.coresignal.com/cdapi/v1/linkedin/company/search/filter", body: filterBody },
+    { url: "https://api.coresignal.com/cdapi/v1/companies/search/filter", body: filterBody },
+  ].filter(Boolean) as Array<{ url: string; body: Record<string, unknown> }>;
+  const candidates = candidatesWithBody.map((c) => c.url);
 
   // Try each path with EACH single auth header in isolation (some gateways reject ambiguous multi-auth)
   const authHeaderSets: Array<Record<string, string>> = [
@@ -165,8 +173,10 @@ async function probeCoreSignal(): Promise<ProbeResult> {
   ];
 
   const attempts: string[] = [];
+  let firstAuthError: { status: number; path: string; auth: string; body: string } | null = null;
   const start = Date.now();
-  for (const url of candidates) {
+  for (const candidate of candidatesWithBody) {
+    const url = candidate.url;
     let bestStatus: number | null = null;
     let bestBody = "";
     for (const auth of authHeaderSets) {
@@ -175,7 +185,7 @@ async function probeCoreSignal(): Promise<ProbeResult> {
         const res = await fetchWithTimeout(url, {
           method: "POST",
           headers: { "Content-Type": "application/json", ...auth },
-          body: JSON.stringify({ website: "google.com" }),
+          body: JSON.stringify(candidate.body),
         }, 10000);
         const dt = Date.now() - t0;
         const shortPath = url.replace("https://api.coresignal.com", "").replace("https://api-prod.coresignal.com", "PROD");
@@ -186,7 +196,14 @@ async function probeCoreSignal(): Promise<ProbeResult> {
         }
         if (res.status === 401 || res.status === 403) {
           const txt = await res.text().catch(() => "");
-          return { ok: false, latencyMs: Date.now() - start, status: res.status, error: `Path ${shortPath} exists but key denied (${res.status}) using ${authName}. Body: ${txt.slice(0, 160)}. Key may lack access to this specific product on your plan — check CoreSignal dashboard → API access scope.` };
+          if (!firstAuthError) {
+            firstAuthError = { status: res.status, path: shortPath, auth: authName, body: txt.slice(0, 200) };
+          }
+          if (bestStatus === null || res.status < bestStatus) {
+            bestStatus = res.status;
+            bestBody = txt.slice(0, 100);
+          }
+          continue;
         }
         if (res.status !== 404 && (bestStatus === null || res.status < (bestStatus || 999))) {
           bestStatus = res.status;
@@ -203,6 +220,19 @@ async function probeCoreSignal(): Promise<ProbeResult> {
     void bestBody;
   }
 
+  if (firstAuthError) {
+    const isAccessIssue = /credits|access|product|plan|tier|subscription/i.test(firstAuthError.body);
+    const guidance = isAccessIssue
+      ? `Your key is recognised by CoreSignal but does NOT have access to this dataset. Open https://dashboard.coresignal.com → API → check which products are enabled (e.g., Company Multi-Source vs Company Base). Buy/enable the right one or use a key that has it.`
+      : `Tried 4 auth header formats — all rejected. The key might be revoked, regenerated, or copied with extra whitespace/quotes. Re-copy from https://dashboard.coresignal.com → API Keys (NO surrounding quotes when pasting into .env.local).`;
+    return {
+      ok: false,
+      latencyMs: Date.now() - start,
+      status: firstAuthError.status,
+      error: `Path ${firstAuthError.path} exists, but key was rejected (${firstAuthError.status}) on every auth header (apikey, Authorization Bearer, X-API-KEY, raw). Server response: ${firstAuthError.body || "(empty)"}. ${guidance}`,
+    };
+  }
+
   const keyHint = keyValidStatus === 200
     ? `Key IS valid (${keyValidPath} returned 200) but no known company-search path matches your tier.`
     : keyValidStatus === 401 || keyValidStatus === 403
@@ -213,7 +243,7 @@ async function probeCoreSignal(): Promise<ProbeResult> {
     ok: false,
     latencyMs: Date.now() - start,
     status: 404,
-    error: `${keyHint} Open https://dashboard.coresignal.com → API Reference → copy the FIRST POST URL shown for company search. Set CORESIGNAL_BASE_URL to that URL up to (and not including) /search/filter, e.g., https://api.coresignal.com/cdapi/v1/professional_network/company. Tried ${attempts.length} paths.`,
+    error: `${keyHint} Fix: open https://dashboard.coresignal.com → API Reference → click any POST endpoint (e.g. "Company Multi-source · Search by filter") → copy the cURL example URL. Then set CORESIGNAL_BASE_URL in .env.local to that URL up to (NOT including) /search/filter. Examples: "https://api.coresignal.com/cdapi/v2/company_multi_source" or "https://api.coresignal.com/cdapi/v2/employee_multi_source". Tried ${attempts.length} paths: ${attempts.slice(0, 6).join(", ")}.`,
   };
 }
 

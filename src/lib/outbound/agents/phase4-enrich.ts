@@ -10,6 +10,10 @@ export interface EnrichInput {
   useFreeSearchFirst?: boolean;
   shouldCancel?: () => Promise<boolean>;
   signal?: AbortSignal;
+  // When the operator explicitly typed these domains into "Run on specific domains",
+  // we keep them in the enriched set even if Apollo can't match them by exact primary_domain.
+  // A stub record is built from the domain root so phase 5 / 6 still process them.
+  requiredDomains?: string[];
 }
 
 export interface EnrichOutput {
@@ -79,6 +83,17 @@ function parseOrg(o: ApolloOrgFull, fallbackDomain: string): EnrichedAccount {
   };
 }
 
+function normaliseDomainRoot(s: string): string {
+  return (s || "")
+    .toLowerCase()
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/.*$/, "")
+    .replace(/\?.*$/, "")
+    .trim();
+}
+
 async function searchCompaniesByDomains(domains: string[], apiKey: string, signal?: AbortSignal): Promise<EnrichedAccount[]> {
   const res = await fetch("https://api.apollo.io/v1/mixed_companies/search", {
     method: "POST",
@@ -93,11 +108,17 @@ async function searchCompaniesByDomains(domains: string[], apiKey: string, signa
   if (!res.ok) throw new Error(`apollo search ${res.status}`);
   const data = (await res.json()) as { organizations?: ApolloOrgFull[]; accounts?: ApolloOrgFull[] };
   const orgs = data.organizations || data.accounts || [];
+  // Strict-match guard: Apollo's q_organization_domains_list can return orgs whose
+  // primary_domain doesn't actually equal what we asked for (sometimes matches via secondary
+  // domain or alias). Only accept orgs where primary_domain (normalised) is in the request set.
+  const requestedSet = new Set(domains.map(normaliseDomainRoot));
   const rows: EnrichedAccount[] = [];
   for (const o of orgs) {
     if (!o || !o.name) continue;
     const dom = (o.primary_domain || "").toLowerCase().trim();
     if (!dom) continue;
+    const domRoot = normaliseDomainRoot(dom);
+    if (!requestedSet.has(domRoot)) continue; // reject adjacent / similar-name companies
     rows.push(parseOrg(o, dom));
   }
   return rows;
@@ -116,10 +137,20 @@ async function bulkEnrichApollo(domains: string[], apiKey: string, signal?: Abor
   if (!res.ok) throw new Error(`apollo bulk_enrich ${res.status}`);
   const data = (await res.json()) as { organizations?: ApolloOrgFull[] };
   const orgs = data.organizations || [];
+  // Apollo's bulk_enrich is positional (response[i] corresponds to domains[i]). Verify
+  // that each returned org's primary_domain still matches the requested domain — otherwise
+  // we'd be storing the wrong company under that key (e.g. "libas.in" → "libaas.com").
   const rows: EnrichedAccount[] = [];
   for (let i = 0; i < orgs.length; i++) {
     const o = orgs[i];
     if (!o || !o.name) continue;
+    const requestedRoot = normaliseDomainRoot(domains[i] || "");
+    const returnedRoot = normaliseDomainRoot(o.primary_domain || "");
+    if (requestedRoot && returnedRoot && requestedRoot !== returnedRoot) {
+      // Apollo gave us a different company (likely an alias / acquisition). Reject and let
+      // the orchestrator's stub-builder produce a placeholder for the requested domain.
+      continue;
+    }
     rows.push(parseOrg(o, domains[i]));
   }
   return { rows, matchedCount: rows.length };
@@ -350,6 +381,52 @@ export async function enrichAgent(input: EnrichInput): Promise<{ output: EnrichO
     }
   }
 
+  // Operator-required domains (explicit "Run on specific domains" override) — if Apollo
+  // can't match them by exact primary_domain, build a minimum-viable stub from the domain
+  // root so phase 5 score / phase 6 stakeholder still process them. Without this, a single
+  // missed Apollo lookup silently drops a user-requested account.
+  //
+  // CRITICAL: stub.name is left EMPTY. Setting it to a capitalized domain root (e.g.
+  // "libas.in" → "Libas") triggers Phase 6's name-based fuzzy-search fallback, which then
+  // returns people from adjacent-name companies ("Libaas", "Libasify"). Empty name = no
+  // fuzzy expansion = strict-stick to the operator-typed domain only.
+  const requiredDomains = (input.requiredDomains || []).map((d) => d.toLowerCase().trim()).filter(Boolean);
+  let stubsBuilt = 0;
+  for (const rd of requiredDomains) {
+    if (!allByDomain.has(rd)) {
+      const tld = rd.split(".").pop() || "com";
+      const stub: EnrichedAccount = {
+        domain: rd,
+        name: "", // intentionally empty — see comment above
+        industry: "",
+        secondaryIndustries: [],
+        estimatedNumEmployees: 0,
+        organizationRevenuePrinted: "",
+        foundedYear: 0,
+        city: "",
+        state: "",
+        country: tld === "in" || tld === "co.in" ? "India" : "",
+        ownedByOrganization: "",
+        shortDescription: "",
+        keywords: [],
+        dhMarketing: 0,
+        dhEngineering: 0,
+        dhProductManagement: 0,
+        dhSales: 0,
+        headcount6mGrowth: 0,
+        headcount12mGrowth: 0,
+        alexaRanking: 0,
+        linkedinUrl: "",
+        publiclyTradedSymbol: "",
+      };
+      allByDomain.set(rd, stub);
+      stubsBuilt++;
+    }
+  }
+  if (stubsBuilt > 0) {
+    log.push(`Operator-required: built ${stubsBuilt} stub account(s) for unmatched domains so they survive to phase 5/6.`);
+  }
+
   for (const r of allByDomain.values()) enriched.push(r);
 
   const seen = new Set<string>();
@@ -363,6 +440,13 @@ export async function enrichAgent(input: EnrichInput): Promise<{ output: EnrichO
     deduped.push({ ...row, domain: key });
   }
   if (dropped > 0) log.push(`Dropped ${dropped} duplicate primary_domain row(s) from Apollo response.`);
+
+  const requiredSet = new Set(requiredDomains);
+  if (requiredSet.size > 0) {
+    const finalUnmatched = unmatched.filter((d) => !requiredSet.has(d.toLowerCase().trim()));
+    unmatched.length = 0;
+    for (const d of finalUnmatched) unmatched.push(d);
+  }
 
   const matchRatePct = totalDomains === 0 ? 0 : Math.round((deduped.length / totalDomains) * 100);
   log.push(`Total accounts: ${deduped.length}/${totalDomains} (${matchRatePct}% coverage). Cache: ${cacheHits} · search: ${searchHits} · enrich: ${fullEnrichHits} · credits: ${creditsUsed}.`);

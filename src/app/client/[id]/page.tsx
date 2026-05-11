@@ -455,11 +455,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 </select>
                 <select value={detailForm.salesRep} onChange={(e) => setDetailForm({ ...detailForm, salesRep: e.target.value })} className={inputClass}>
                   <option value="">Select Thyleads Rep</option>
-                  {pods.map((pod) => (
-                    <optgroup key={pod.id} label={pod.name}>
-                      {pod.members.map((m) => <option key={`${pod.id}:${m}`} value={m}>{m}</option>)}
-                    </optgroup>
-                  ))}
+                  {(() => {
+                    const allMembers = Array.from(new Set(pods.flatMap((p) => p.members))).sort((a, b) => a.localeCompare(b));
+                    return allMembers.map((m) => <option key={m} value={m}>{m}</option>);
+                  })()}
                   {detailForm.salesRep && !pods.some((p) => p.members.includes(detailForm.salesRep)) && (
                     <option value={detailForm.salesRep}>{detailForm.salesRep} (legacy)</option>
                   )}
@@ -518,13 +517,31 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                       <td className="px-4 py-3 text-slate-700 overflow-hidden truncate">{r.accountManager}</td>
                       <td className="px-4 py-3 overflow-hidden">
                         <div className="flex items-center gap-1.5">
-                          <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
-                            r.meetingStatus === "done" ? "bg-emerald-50 text-emerald-700" :
-                            r.meetingStatus === "pipeline" ? "bg-[#f0e6ff] text-indigo-700" :
-                            "bg-amber-50 text-amber-700"
-                          }`}>
-                            {r.meetingStatus === "done" ? "Done" : r.meetingStatus === "pipeline" ? "Pipeline" : "Scheduled"}
-                          </span>
+                          {isPod ? (
+                            <select
+                              value={r.meetingStatus}
+                              onChange={(e) => updateDetail(id, r.id, { meetingStatus: e.target.value as MeetingStatus })}
+                              className={`px-2 py-0.5 rounded-md text-xs font-medium border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#6800FF]/30 appearance-none pr-5 bg-[length:8px_8px] bg-no-repeat bg-[right_0.4rem_center] ${
+                                r.meetingStatus === "done" ? "bg-emerald-50 text-emerald-700" :
+                                r.meetingStatus === "pipeline" ? "bg-[#f0e6ff] text-indigo-700" :
+                                "bg-amber-50 text-amber-700"
+                              }`}
+                              style={{ backgroundImage: "url(\"data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E\")" }}
+                              title="Update meeting status"
+                            >
+                              <option value="scheduled">Scheduled</option>
+                              <option value="done">Done</option>
+                              <option value="pipeline">Pipeline</option>
+                            </select>
+                          ) : (
+                            <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${
+                              r.meetingStatus === "done" ? "bg-emerald-50 text-emerald-700" :
+                              r.meetingStatus === "pipeline" ? "bg-[#f0e6ff] text-indigo-700" :
+                              "bg-amber-50 text-amber-700"
+                            }`}>
+                              {r.meetingStatus === "done" ? "Done" : r.meetingStatus === "pipeline" ? "Pipeline" : "Scheduled"}
+                            </span>
+                          )}
                           {clientRemarks[r.meetingId]?.remark && (
                             <span className="w-2 h-2 rounded-full bg-[#6800FF] shrink-0" title="Has client remark" />
                           )}

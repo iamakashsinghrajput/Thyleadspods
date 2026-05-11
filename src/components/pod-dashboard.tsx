@@ -14,7 +14,7 @@ import { usePods } from "@/lib/pod-context";
 import { useData } from "@/lib/data-context";
 import { useAuth } from "@/lib/auth-context";
 import { resolveProjectLogo } from "@/lib/client-logo";
-import { isInCurrentWeek } from "@/lib/week-range";
+import { getExpectedMeetingsToDate } from "@/lib/week-range";
 import NotificationBell from "@/components/notification-bell";
 
 const MONTH_OPTIONS = [
@@ -76,37 +76,17 @@ export default function PodDashboard({ podId, userName, impersonateMember }: { p
   const totalCompleted = podProjects.reduce((s, p) => s + (completedByProject[p.id] || 0), 0);
   const avgCompletion = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0;
   const atRisk = podProjects.filter((p) => {
-    const t = p.weeklyTargetExternal > 0 ? p.weeklyTargetExternal : (p.monthlyTargetInternal > 0 ? Math.ceil(p.monthlyTargetInternal / 4) : 0);
-    if (t === 0) return false;
-    let weekDone = 0;
-    for (const d of details[p.id] || []) {
-      if (d.meetingStatus === "done" && isInCurrentWeek(d.meetingDate)) weekDone++;
-    }
-    return Math.round((weekDone / t) * 100) < 50;
+    const expected = getExpectedMeetingsToDate(p.monthlyTargetInternal);
+    if (expected === 0) return false;
+    const done = completedByProject[p.id] || 0;
+    return Math.round((done / expected) * 100) < 50;
   }).length;
 
-  const weeklyDoneByProject = useMemo(() => {
-    const out: Record<string, number> = {};
-    for (const [projectId, list] of Object.entries(details)) {
-      let count = 0;
-      for (const d of list) {
-        if (d.meetingStatus === "done" && isInCurrentWeek(d.meetingDate)) count++;
-      }
-      out[projectId] = count;
-    }
-    return out;
-  }, [details]);
-
-  function getWeeklyTarget(p: typeof podProjects[0]): number {
-    if (p.weeklyTargetExternal > 0) return p.weeklyTargetExternal;
-    if (p.monthlyTargetInternal > 0) return Math.ceil(p.monthlyTargetInternal / 4);
-    return 0;
-  }
-
   function getHealth(p: typeof podProjects[0]) {
-    const target = getWeeklyTarget(p);
-    if (target === 0) return { color: "bg-slate-400", label: "N/A" };
-    const pct = Math.round(((weeklyDoneByProject[p.id] || 0) / target) * 100);
+    const expected = getExpectedMeetingsToDate(p.monthlyTargetInternal);
+    if (expected === 0) return { color: "bg-slate-400", label: "N/A" };
+    const done = completedByProject[p.id] || 0;
+    const pct = Math.round((done / expected) * 100);
     if (pct >= 75) return { color: "bg-emerald-500", label: "On Track" };
     if (pct >= 50) return { color: "bg-amber-400", label: "Needs Attention" };
     return { color: "bg-red-500", label: "At Risk" };

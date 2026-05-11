@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import { useData } from "@/lib/data-context";
-import { isInCurrentWeek } from "@/lib/week-range";
+import { getExpectedMeetingsToDate } from "@/lib/week-range";
 
 interface StatCardsProps {
   selectedMonth: string;
@@ -47,13 +47,10 @@ export default function StatCards({ selectedMonth, selectedYear }: StatCardsProp
     : projects.reduce((s, p) => s + (p.meetingCompleted || 0), 0);
   const avgCompletion = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0;
   const atRisk = projects.filter((p) => {
-    const t = p.weeklyTargetExternal > 0 ? p.weeklyTargetExternal : (p.monthlyTargetInternal > 0 ? Math.ceil(p.monthlyTargetInternal / 4) : 0);
-    if (t === 0) return false;
-    let weekDone = 0;
-    for (const d of details[p.id] || []) {
-      if (d.meetingStatus === "done" && isInCurrentWeek(d.meetingDate)) weekDone++;
-    }
-    return Math.round((weekDone / t) * 100) < 50;
+    const expected = getExpectedMeetingsToDate(p.monthlyTargetInternal);
+    if (expected === 0) return false;
+    const done = projectStats ? (projectStats[p.id]?.completed || 0) : (p.meetingCompleted || 0);
+    return Math.round((done / expected) * 100) < 50;
   }).length;
 
   const cards = [

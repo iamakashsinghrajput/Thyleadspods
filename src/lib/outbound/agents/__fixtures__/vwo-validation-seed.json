@@ -1,0 +1,91 @@
+{
+  "version": "v7",
+  "purpose": "VWO_CLIENT_SKILL.md validation seed — 3 sample emails the operator confirmed are correct. Phase 9 prompt regressions get caught when these stop validating.",
+  "samples": [
+    {
+      "id": "sample_1_d2c_apparel_cmo_tier_a",
+      "context": "D2C Apparel, CMO, Tier A, axis 2 + axis 1. Lead posted on LinkedIn 14 days ago about tier-2/3 acquisition needing different creative.",
+      "expected": {
+        "subject1Pattern": "^[A-Z][a-z]+, [a-z][a-z 0-9]{1,30}$",
+        "subject1ForbidContains": ["VWO", "Wingify", "experimentation", "A/B test", "CRO", "conversion"],
+        "body1MustContain": [
+          "Often, these don't require a full redesign. Even small, validated changes can create measurable improvements.",
+          "without heavy dev effort"
+        ],
+        "body1MustReferenceBrands": ["Andaaz Fashion", "Attrangi", "Utsav Fashion"],
+        "body1ForbidUnverifiedMetrics": true,
+        "body2MustReferenceCapability": "form analytics + heatmaps on demo/checkout"
+      },
+      "input": {
+        "stakeholder": { "firstName": "Priya", "lastName": "Sharma", "fullName": "Priya Sharma", "title": "Chief Marketing Officer", "linkedinUrl": "https://linkedin.com/in/priya-sharma" },
+        "account": { "name": "Andaaz Wear", "domain": "andaazwear.example", "industry": "apparel", "country": "India", "estimatedNumEmployees": 250 },
+        "research": {
+          "observationAngle": "your homepage hero on andaazwear.example serves one creative variant for all geographies",
+          "topPain": "tier-2/3 acquisition CR plateau",
+          "valueAngle": "lift CR 8-12% in 6 weeks via geo-personalised hero",
+          "socialAngle": "your post on tier-2/3 needing different creative resonates",
+          "evidenceList": ["Recent LinkedIn post on tier-2/3 acquisition", "Marketing headcount up 20% in 6m"],
+          "personEvidence": ["Posted 14 days ago on tier-2/3 creative differentiation"],
+          "icpRole": "VP Marketing",
+          "subjectTopic": "your homepage hero",
+          "socialProofMatch": ["Andaaz Fashion", "Attrangi", "Utsav Fashion"]
+        }
+      }
+    },
+    {
+      "id": "sample_2_fintech_head_growth_tier_b",
+      "context": "Fintech, Head of Growth, Tier B, axis 1 + axis 3a. No fresh axis 2 signal.",
+      "expected": {
+        "subject1ForbidContains": ["VWO", "Wingify", "experimentation", "A/B test", "CRO", "conversion"],
+        "body1MustContain": [
+          "Often, these don't require a full redesign. Even small, validated changes can create measurable improvements.",
+          "without heavy dev effort"
+        ],
+        "body1MustReferenceBrands": ["HDFC Bank", "PayU"],
+        "body1ForbidUnverifiedMetrics": true,
+        "body2MustReferenceCapability": "A/B test on form-step splits"
+      },
+      "input": {
+        "stakeholder": { "firstName": "Rohan", "lastName": "Mehta", "fullName": "Rohan Mehta", "title": "Head of Growth", "linkedinUrl": "https://linkedin.com/in/rohan-mehta" },
+        "account": { "name": "QuickPay India", "domain": "quickpay.example", "industry": "fintech", "country": "India", "estimatedNumEmployees": 350 },
+        "research": {
+          "observationAngle": "your KYC step asks for PAN, Aadhaar OTP, bank linkage, selfie liveness across 4 near-back-to-back screens",
+          "topPain": "KYC drop-off above 35%",
+          "valueAngle": "form analytics + step-split A/B to reduce drop-off without redesign",
+          "socialAngle": "",
+          "evidenceList": ["Hiring 3 senior growth roles in last 60 days", "Series B announced 4 months ago"],
+          "personEvidence": [],
+          "icpRole": "Head of Growth",
+          "subjectTopic": "your kyc step",
+          "socialProofMatch": ["HDFC Bank", "PayU", "Indian fintech players"]
+        }
+      }
+    },
+    {
+      "id": "sample_3_saas_cto_breakup",
+      "context": "SaaS B2B, CTO, Tier C, breakup body 3 anchored on signal_for_body_3.",
+      "expected": {
+        "subject1ForbidContains": ["VWO", "Wingify", "experimentation", "A/B test", "CRO", "conversion"],
+        "body1MustReferenceBrands": ["POSist (Restroworks)", "PayScale"],
+        "body3ToneBreakup": true
+      },
+      "input": {
+        "stakeholder": { "firstName": "Akash", "lastName": "Kumar", "fullName": "Akash Kumar", "title": "CTO", "linkedinUrl": "https://linkedin.com/in/akash-kumar" },
+        "account": { "name": "DemoForge", "domain": "demoforge.example", "industry": "saas", "country": "India", "estimatedNumEmployees": 180 },
+        "research": {
+          "observationAngle": "your demo form on demoforge.example serves both SMB and enterprise leads with same fields",
+          "topPain": "demo-to-trial CVR plateaus",
+          "valueAngle": "form analytics + A/B test on demo-form personalisation",
+          "socialAngle": "ex-Lenskart growth — same playbook applies to SaaS demo flows",
+          "evidenceList": ["No A/B testing tool in current stack"],
+          "personEvidence": ["Previously led growth at Lenskart"],
+          "icpRole": "CTO/VP Eng",
+          "subjectTopic": "your demo form",
+          "secondaryObservation": "your pricing page lacks segment-specific routing",
+          "signalForBody3": "if your demo-to-trial conversion plateaus this quarter",
+          "socialProofMatch": ["POSist (Restroworks)", "PayScale", "Indian SaaS players"]
+        }
+      }
+    }
+  ]
+}

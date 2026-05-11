@@ -311,7 +311,7 @@ export default function LeadsTable({ leads, pilotId, onChanged, isTest }: { lead
                   <tr className="hover:bg-slate-50">
                     <td className="px-3 py-2 tabular-nums text-slate-500 cursor-pointer" onClick={() => setActive(l)}>#{l.rank}</td>
                     <td className="px-3 py-2 cursor-pointer" onClick={() => setActive(l)}>
-                      <p className="font-medium text-slate-900 truncate max-w-[180px]">{l.companyShort}</p>
+                      <p className="font-medium text-slate-900 truncate max-w-[180px]">{l.companyShort || l.accountDomain}</p>
                       <p className="text-[10px] text-slate-400">{l.accountDomain} · score {l.score}</p>
                     </td>
                     <td className="px-3 py-2 cursor-pointer" onClick={() => setActive(l)}>
@@ -412,7 +412,7 @@ export default function LeadsTable({ leads, pilotId, onChanged, isTest }: { lead
                                 </button>
                               )}
                             </div>
-                            <pre className="p-2.5 max-h-[280px] overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-slate-700 bg-slate-50">{expandLoading ? "Loading prompt…" : expandedFull?.claudePrompt || (l.hasPrompt ? "(loading)" : "(no prompt — phase 9 hasn't run yet)")}</pre>
+                            <pre className="p-2.5 max-h-[280px] overflow-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-slate-700 bg-slate-50">{expandLoading ? "Loading prompt…" : expandedFull?.claudePrompt || (l.hasPrompt ? "(loading)" : (l.validationIssues && l.validationIssues.length > 0 ? `(no prompt — ${l.validationIssues.join(", ")})` : "(no prompt — phase 9 didn't generate one for this lead. Check Pipeline tab → draft phase log.)"))}</pre>
                           </div>
                         </div>
                       </td>
@@ -557,9 +557,38 @@ function LeadDetail({ lead, onBack, pilotId, isTest }: { lead: PilotLeadRow; onB
           </div>
         )}
 
+        {(lead.socialAngle || (lead.personEvidence && lead.personEvidence.length > 0) || lead.icpRole) && (
+          <div className="mt-3 bg-linear-to-br from-sky-50 to-white border border-sky-200 rounded-lg p-3 space-y-2">
+            <div className="flex items-baseline justify-between gap-2 flex-wrap">
+              <p className="text-[10px] font-bold text-sky-700 uppercase tracking-wider">Lead-level research (per-person)</p>
+              {lead.icpRole && (
+                <span className="inline-flex items-center px-2 py-0.5 bg-sky-100 text-sky-800 rounded text-[10px] font-semibold">{lead.icpRole}</span>
+              )}
+            </div>
+            {lead.socialAngle ? (
+              <div className="bg-white border border-sky-100 rounded p-2 text-[11px] text-slate-800 leading-relaxed">
+                <span className="text-[9px] font-bold uppercase tracking-wider text-sky-700 block mb-1">Social angle</span>
+                {lead.socialAngle}
+              </div>
+            ) : (
+              <div className="bg-amber-50 border border-amber-200 rounded p-2 text-[10px] text-amber-900 leading-relaxed">
+                <span className="font-bold">No meaningful per-lead signal found.</span> No recent (≤90d) on-topic LinkedIn post, podcast appearance, or interview quote could be verified. Either skip this lead, OR open their LinkedIn manually and write a custom opener — generic identifiers (title, tenure, education, past employer) were rejected as fake-feeling fillers.
+              </div>
+            )}
+            {lead.personEvidence && lead.personEvidence.length > 0 && (
+              <div>
+                <span className="text-[9px] font-bold uppercase tracking-wider text-sky-700">Person evidence ({lead.personEvidence.length})</span>
+                <ul className="mt-1 space-y-0.5 list-disc list-inside text-[10px] text-slate-700">
+                  {lead.personEvidence.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
         {(lead.theirCustomers || lead.topPain || lead.valueAngle) && (
           <div className="mt-3 bg-linear-to-br from-[#f8f5ff] to-white border border-[#6800FF]/20 rounded-lg p-3 space-y-2">
-            <p className="text-[10px] font-bold text-[#6800FF] uppercase tracking-wider">Per-lead research (the brain)</p>
+            <p className="text-[10px] font-bold text-[#6800FF] uppercase tracking-wider">Account-level research (shared across siblings)</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
               {lead.whatTheySell && <Block label="What they sell" value={lead.whatTheySell} />}
               {lead.theirCustomers && <Block label="Their customers" value={lead.theirCustomers} />}
