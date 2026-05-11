@@ -56,6 +56,59 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const router = useRouter();
 
+  useEffect(() => {
+    if (!hydrated || !user?.email) return;
+    let cancelled = false;
+
+    async function refresh() {
+      try {
+        const res = await fetch(`/api/auth/me?email=${encodeURIComponent(user!.email)}`, { cache: "no-store" });
+        if (cancelled) return;
+        if (res.status === 404) {
+          setUserState(null);
+          router.push("/");
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+        const fresh = data.user;
+        if (!fresh) return;
+        setUserState((prev) => {
+          if (!prev) return prev;
+          const changed =
+            prev.role !== fresh.role ||
+            (prev.podId || "") !== (fresh.podId || "") ||
+            (prev.projectId || "") !== (fresh.projectId || "") ||
+            (prev.name || "") !== (fresh.name || "") ||
+            (prev.approverId || "") !== (fresh.approverId || "") ||
+            (prev.avatarUrl || "") !== (fresh.avatarUrl || "");
+          if (!changed) return prev;
+          return {
+            ...prev,
+            name: fresh.name,
+            role: fresh.role,
+            podId: fresh.podId,
+            projectId: fresh.projectId,
+            avatarUrl: fresh.avatarUrl,
+            approverId: fresh.approverId,
+          };
+        });
+      } catch {}
+    }
+
+    void refresh();
+    const interval = setInterval(refresh, 20_000);
+    const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [hydrated, user?.email, router]);
+
   const setUser = useCallback((u: User) => {
     setUserState(u);
   }, []);

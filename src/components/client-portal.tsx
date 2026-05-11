@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useData } from "@/lib/data-context";
-import { LogOut, Calendar, CheckCircle2, Clock, MessageSquare, X, Mail, Phone, User, Building2, Globe, Video, Loader2, Search } from "lucide-react";
+import { LogOut, Calendar, CheckCircle2, Clock, MessageSquare, X, Mail, Phone, User, Building2, Globe, Video, Loader2, Search, Send, MailOpen, Reply, MousePointer2, AlertTriangle, MailX, ChevronRight, Sparkles } from "lucide-react";
 import Image from "next/image";
 import type { ClientDetail } from "@/lib/client-data";
 
@@ -121,6 +121,52 @@ const statusStyle: Record<string, { bg: string; text: string; label: string }> =
   pipeline: { bg: "bg-amber-50", text: "text-amber-700", label: "Pipeline" },
 };
 
+function parseMeetingDateTime(date: string, time: string): Date | null {
+  if (!date) return null;
+  let hh = 0, mm = 0;
+  if (time) {
+    const cleaned = time.trim();
+    const ampmMatch = cleaned.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+    if (ampmMatch) {
+      hh = parseInt(ampmMatch[1], 10);
+      mm = parseInt(ampmMatch[2], 10);
+      const suffix = ampmMatch[3]?.toUpperCase();
+      if (suffix === "PM" && hh < 12) hh += 12;
+      if (suffix === "AM" && hh === 12) hh = 0;
+    }
+  }
+  const [y, mo, d] = date.split("-").map(Number);
+  if (!y || !mo || !d) return null;
+  return new Date(y, mo - 1, d, hh, mm, 0, 0);
+}
+
+function fmtCountdown(target: Date, now: number): { label: string; live: boolean; soon: boolean } {
+  const diff = target.getTime() - now;
+  const abs = Math.abs(diff);
+  if (diff < 0 && abs <= 60 * 60_000) return { label: "Live now", live: true, soon: false };
+  if (diff < 0) return { label: `Started ${Math.round(abs / 60_000)}m ago`, live: false, soon: false };
+  const mins = Math.round(diff / 60_000);
+  if (mins < 60) return { label: `In ${mins}m`, live: false, soon: mins <= 30 };
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return { label: `In ${hrs}h`, live: false, soon: false };
+  const days = Math.round(hrs / 24);
+  if (days === 1) return { label: "Tomorrow", live: false, soon: false };
+  if (days < 7) return { label: `In ${days} days`, live: false, soon: false };
+  return { label: target.toLocaleDateString("en-US", { month: "short", day: "numeric" }), live: false, soon: false };
+}
+
+function meetingBucket(date: string, todayStr: string): "today" | "tomorrow" | "this-week" | "later" | "past" {
+  if (!date) return "past";
+  if (date === todayStr) return "today";
+  const today = new Date(todayStr + "T00:00:00");
+  const target = new Date(date + "T00:00:00");
+  const diffDays = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  if (diffDays === 1) return "tomorrow";
+  if (diffDays > 1 && diffDays <= 7) return "this-week";
+  if (diffDays > 7) return "later";
+  return "past";
+}
+
 export default function ClientPortal() {
   const { user, logout } = useAuth();
   const { details } = useData();
@@ -138,6 +184,54 @@ export default function ClientPortal() {
 
   const projectId = user?.projectId || "";
   const meetings: ClientDetail[] = details[projectId] ?? [];
+
+  type SmartleadCampaignRow = {
+    campaign_id: number;
+    name: string;
+    status: string;
+    sent_count?: number;
+    open_count?: number;
+    unique_open_count?: number;
+    reply_count?: number;
+    click_count?: number;
+    unique_click_count?: number;
+    bounce_count?: number;
+    unsubscribed_count?: number;
+  };
+  type SmartleadTotals = {
+    sent: number; opens: number; replies: number; clicks: number; bounces: number; unsubscribes: number;
+    openRate: number; replyRate: number; clickRate: number; bounceRate: number; unsubscribeRate: number;
+  };
+  const [smartlead, setSmartlead] = useState<{ campaigns: SmartleadCampaignRow[]; totals: SmartleadTotals; configured: boolean; reason?: string } | null>(null);
+  const [smartleadLoading, setSmartleadLoading] = useState(true);
+  const [smartleadError, setSmartleadError] = useState("");
+  const [activeTab, setActiveTab] = useState<"meetings" | "campaigns">("meetings");
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    if (!projectId) { setSmartleadLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      setSmartleadLoading(true);
+      setSmartleadError("");
+      try {
+        const res = await fetch(`/api/portal/smartlead?projectId=${encodeURIComponent(projectId)}`, { cache: "no-store" });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) { setSmartleadError(data.error || "Failed to load campaigns"); setSmartleadLoading(false); return; }
+        setSmartlead(data);
+      } catch (e) {
+        if (!cancelled) setSmartleadError(e instanceof Error ? e.message : "Network error");
+      } finally {
+        if (!cancelled) setSmartleadLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId]);
 
   const fetchRemarks = useCallback(async () => {
     if (!projectId) return;
@@ -211,8 +305,6 @@ export default function ClientPortal() {
     return numB - numA;
   });
 
-  const meetingsWithRemarks = filtered.filter((m) => remarks[m.meetingId]?.remark);
-
   const scheduledCount = meetings.filter((m) => m.meetingStatus === "scheduled").length;
   const pipelineCount = meetings.filter((m) => m.meetingStatus === "pipeline").length;
   const doneCount = meetings.filter((m) => m.meetingStatus === "done").length;
@@ -220,8 +312,7 @@ export default function ClientPortal() {
   const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const upcomingMeetings = meetings
     .filter((m) => m.meetingStatus === "scheduled" && m.meetingDate && m.meetingDate >= todayStr)
-    .sort((a, b) => a.meetingDate.localeCompare(b.meetingDate) || (a.meetingTime || "").localeCompare(b.meetingTime || ""))
-    .slice(0, 4);
+    .sort((a, b) => a.meetingDate.localeCompare(b.meetingDate) || (a.meetingTime || "").localeCompare(b.meetingTime || ""));
 
   const recentRemarkItems = Object.entries(remarks)
     .filter(([, r]) => r.remark)
@@ -247,14 +338,6 @@ export default function ClientPortal() {
     }
   }
   const teamMembers = Array.from(teamMap.values()).sort((a, b) => b.count - a.count).slice(0, 4);
-
-  // Group filtered meetings by month for the timeline list
-  const groupedByMonth = filtered.reduce<Record<string, ClientDetail[]>>((acc, m) => {
-    const key = parseMonthKey(m);
-    (acc[key] ||= []).push(m);
-    return acc;
-  }, {});
-  const monthGroupKeys = Object.keys(groupedByMonth).sort((a, b) => monthSortKey(b) - monthSortKey(a));
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
@@ -308,228 +391,330 @@ export default function ClientPortal() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-        <div className="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200">
-            <div className="flex flex-col md:flex-row md:items-center gap-3">
-              <div className="flex items-center gap-2 shrink-0">
-                <h2 className="text-base font-bold text-slate-900">All meetings</h2>
-                <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md tabular-nums">{filtered.length}</span>
-              </div>
-              <div className="flex-1 flex flex-wrap items-center gap-2 md:justify-end">
-                <div className="relative flex-1 md:flex-none md:w-64">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                  <input type="text" placeholder="Search company, contact, or ID..." value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10" />
-                </div>
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10">
-                  <option value="all">All Status</option>
-                  <option value="done">Completed</option>
-                  <option value="scheduled">Scheduled</option>
-                  <option value="pipeline">Pipeline</option>
-                </select>
-                <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value)} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10">
-                  <option value="all">All Months</option>
-                  {months.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
+        <div className="bg-white border border-slate-200 rounded-2xl p-1 mb-5 inline-flex shadow-sm">
+          {([
+            { key: "meetings" as const, label: "Meetings", count: meetings.length },
+            { key: "campaigns" as const, label: "Campaigns", count: smartlead?.campaigns.length || 0 },
+          ]).map((t) => {
+            const active = activeTab === t.key;
+            return (
+              <button
+                key={t.key}
+                onClick={() => setActiveTab(t.key)}
+                className={`px-4 py-1.5 rounded-xl text-sm font-semibold transition-colors flex items-center gap-2 ${
+                  active ? "bg-[#6800FF] text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                {t.label}
+                <span className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded ${active ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>{t.count}</span>
+              </button>
+            );
+          })}
+        </div>
 
-          {loading ? (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 size={24} className="text-[#6800FF] animate-spin" />
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="text-center py-20">
-              <div className="w-14 h-14 rounded-full bg-slate-100 mx-auto mb-3 flex items-center justify-center">
-                <Calendar size={22} className="text-slate-400" />
-              </div>
-              <p className="text-sm font-semibold text-slate-700">No meetings found</p>
-              <p className="text-xs text-slate-400 mt-1">{search || statusFilter !== "all" || monthFilter !== "all" ? "Try adjusting your filters" : "Meetings will appear here once scheduled"}</p>
-            </div>
-          ) : (
-            <div className="max-h-110 overflow-y-auto">
-              {monthGroupKeys.map((monthKey) => {
-                const group = groupedByMonth[monthKey];
-                return (
-                  <div key={monthKey}>
-                    <div className="px-6 py-2.5 bg-slate-50 border-y border-slate-100 flex items-center justify-between sticky top-0 z-10">
-                      <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">{monthKey}</p>
-                      <p className="text-[11px] font-semibold text-slate-500 tabular-nums">{group.length} meeting{group.length !== 1 ? "s" : ""}</p>
+        {activeTab === "campaigns" && (
+          <CampaignsSection smartlead={smartlead} loading={smartleadLoading} error={smartleadError} />
+        )}
+
+        {activeTab === "meetings" && (() => {
+          const heroMeeting = upcomingMeetings[0];
+          const heroDt = heroMeeting ? parseMeetingDateTime(heroMeeting.meetingDate, heroMeeting.meetingTime) : null;
+          const heroCountdown = heroDt ? fmtCountdown(heroDt, nowMs) : null;
+          const awaitingFeedbackCount = meetings.filter((m) => m.meetingStatus === "done" && !remarks[m.meetingId]?.remark).length;
+          const thisWeekScheduled = upcomingMeetings.filter((m) => {
+            if (!m.meetingDate) return false;
+            const today = new Date(todayStr + "T00:00:00");
+            const target = new Date(m.meetingDate + "T00:00:00");
+            return target.getTime() - today.getTime() <= 7 * 86_400_000;
+          }).length;
+
+          const filterChips: Array<{ key: string; label: string; count: number }> = [
+            { key: "all",       label: "All",       count: meetings.length },
+            { key: "scheduled", label: "Upcoming",  count: scheduledCount },
+            { key: "done",      label: "Completed", count: doneCount },
+            { key: "pipeline",  label: "Pipeline",  count: pipelineCount },
+          ];
+
+          const buckets = filtered.reduce<Record<string, ClientDetail[]>>((acc, m) => {
+            const b = meetingBucket(m.meetingDate, todayStr);
+            if (b === "today") (acc.today ||= []).push(m);
+            else if (b === "tomorrow") (acc.tomorrow ||= []).push(m);
+            else if (b === "this-week") (acc["this-week"] ||= []).push(m);
+            else {
+              const key = parseMonthKey(m);
+              (acc[key] ||= []).push(m);
+            }
+            return acc;
+          }, {});
+          const monthKeysSorted = Object.keys(buckets).filter((k) => !["today", "tomorrow", "this-week"].includes(k)).sort((a, b) => monthSortKey(b) - monthSortKey(a));
+          const orderedBuckets: Array<[string, ClientDetail[], string]> = [];
+          if (buckets.today) orderedBuckets.push(["today", buckets.today, "Today"]);
+          if (buckets.tomorrow) orderedBuckets.push(["tomorrow", buckets.tomorrow, "Tomorrow"]);
+          if (buckets["this-week"]) orderedBuckets.push(["this-week", buckets["this-week"], "This week"]);
+          for (const k of monthKeysSorted) orderedBuckets.push([k, buckets[k], k]);
+
+          return (
+        <div className="space-y-5">
+          {heroMeeting && heroCountdown ? (
+            <button
+              onClick={() => openMeeting(heroMeeting)}
+              className={`w-full text-left rounded-2xl border shadow-sm overflow-hidden transition-all hover:shadow-md ${
+                heroCountdown.live
+                  ? "border-emerald-300 bg-gradient-to-br from-emerald-50 via-white to-emerald-50"
+                  : heroCountdown.soon
+                    ? "border-[#6800FF]/30 bg-gradient-to-br from-[#f7f0ff] via-white to-[#f7f0ff]"
+                    : "border-slate-200 bg-white"
+              }`}
+            >
+              <div className="px-6 py-5 flex flex-col md:flex-row md:items-center gap-5">
+                <div className="flex items-center gap-4 flex-1 min-w-0">
+                  <div className={`shrink-0 w-16 h-16 rounded-2xl flex flex-col items-center justify-center text-white shadow-md ${heroCountdown.live ? "bg-emerald-600" : heroCountdown.soon ? "bg-[#6800FF]" : "bg-slate-900"}`}>
+                    <span className="text-[10px] font-bold uppercase tracking-wider opacity-80">{heroDt!.toLocaleDateString("en-US", { month: "short" })}</span>
+                    <span className="text-2xl font-bold leading-none tabular-nums">{heroDt!.getDate()}</span>
+                    <span className="text-[9px] font-medium opacity-70 mt-0.5">{heroDt!.toLocaleDateString("en-US", { weekday: "short" })}</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                        heroCountdown.live ? "bg-emerald-100 text-emerald-700" : heroCountdown.soon ? "bg-[#6800FF]/10 text-[#6800FF]" : "bg-slate-100 text-slate-600"
+                      }`}>
+                        {heroCountdown.live && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                        {heroCountdown.label === "Live now" ? "Live now" : "Next meeting"}
+                      </span>
+                      {heroCountdown.label !== "Live now" && (
+                        <span className="text-[11px] font-semibold text-slate-500">{heroCountdown.label}</span>
+                      )}
                     </div>
-                    <div className="divide-y divide-slate-100">
-                      {group.map((m) => {
-                        const st = statusStyle[m.meetingStatus] || statusStyle.pipeline;
-                        const dotColor = m.meetingStatus === "done" ? "bg-emerald-500" : m.meetingStatus === "scheduled" ? "bg-blue-500" : "bg-amber-500";
-                        const rm = remarks[m.meetingId];
-                        const hasRemark = !!rm?.remark;
-                        const dateObj = m.meetingDate ? new Date(m.meetingDate) : null;
-                        const dayNum = dateObj ? dateObj.getDate() : "—";
-                        const monShort = dateObj ? dateObj.toLocaleDateString("en-US", { month: "short" }) : "";
-                        const weekday = dateObj ? dateObj.toLocaleDateString("en-US", { weekday: "short" }) : "";
-                        return (
-                          <button
-                            key={m.id}
-                            onClick={() => openMeeting(m)}
-                            className="w-full px-6 py-4 flex items-start gap-4 text-left hover:bg-slate-50 transition-colors group"
-                          >
-                            <div className="flex flex-col items-center justify-center w-12 shrink-0 rounded-xl border border-slate-200 bg-white py-1.5 group-hover:border-[#6800FF]/40 transition-colors">
-                              <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider">{monShort}</span>
-                              <span className="text-lg font-bold text-slate-900 leading-none tabular-nums my-0.5">{dayNum}</span>
-                              <span className="text-[9px] font-medium text-slate-400 uppercase">{weekday}</span>
-                            </div>
-                            <div className="flex-1 min-w-0 pt-0.5">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="text-sm font-bold text-slate-900 truncate">{m.companyName}</p>
-                                {hasRemark && (
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-[#6800FF] bg-[#6800FF]/5 border border-[#6800FF]/10 px-2 py-0.5 rounded-md">
-                                    <MessageSquare size={9} /> Remark
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-xs text-slate-600 mt-1 truncate">
-                                {m.contactName}{m.contactTitle ? <span className="text-slate-400"> · {m.contactTitle}</span> : null}
-                              </p>
-                              {hasRemark && rm && (
-                                <p className="text-[10px] text-slate-400 mt-1.5">Updated {fmtRelative(rm.updatedAt)}</p>
-                              )}
-                            </div>
-                            <div className="shrink-0 flex flex-col items-end gap-1.5 pt-0.5">
-                              <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md ${st.bg} ${st.text}`}>
-                                <span className={`w-1 h-1 rounded-full ${dotColor}`} />
-                                {st.label}
-                              </span>
-                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 tabular-nums">
-                                <Clock size={11} className="text-slate-400" /> {m.meetingTime || "—"}
-                              </span>
-                              <span className="font-mono text-[10px] text-slate-400">{m.meetingId}</span>
-                              {m.meetingLink && (
-                                <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-[#6800FF] bg-[#6800FF]/5 px-2.5 py-1 rounded-md group-hover:bg-[#6800FF]/10 transition-colors">
-                                  <Video size={11} /> Join
-                                </span>
-                              )}
-                            </div>
-                          </button>
-                        );
-                      })}
+                    <h2 className="text-xl font-bold text-slate-900 truncate mt-1.5">{heroMeeting.companyName}</h2>
+                    <p className="text-sm text-slate-600 truncate mt-0.5">
+                      {heroMeeting.contactName}{heroMeeting.contactTitle ? <span className="text-slate-400"> · {heroMeeting.contactTitle}</span> : null}
+                    </p>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
+                      <span className="inline-flex items-center gap-1.5 tabular-nums"><Clock size={12} className="text-slate-400" /> {heroMeeting.meetingTime || "—"}</span>
+                      {heroMeeting.salesRep && <span className="inline-flex items-center gap-1.5"><User size={12} className="text-slate-400" /> {heroMeeting.salesRep}</span>}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-
-          {meetingsWithRemarks.length > 0 && (
-            <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 text-[11px] text-slate-500 flex items-center gap-2">
-              <MessageSquare size={11} />
-              {meetingsWithRemarks.length} meeting{meetingsWithRemarks.length !== 1 ? "s" : ""} with your remarks
-            </div>
-          )}
-        </div>
-
-        <aside className="space-y-5">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <Calendar size={14} className="text-[#6800FF]" />
-                Upcoming meetings
-              </h3>
-              <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md tabular-nums">{upcomingMeetings.length}</span>
-            </div>
-            {upcomingMeetings.length === 0 ? (
-              <div className="px-5 py-8 text-center">
-                <p className="text-xs text-slate-400">No upcoming meetings scheduled</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {heroMeeting.meetingLink && (
+                    <a
+                      href={heroMeeting.meetingLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                        heroCountdown.live ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "bg-[#6800FF] hover:bg-[#5800DD] text-white"
+                      }`}
+                    >
+                      <Video size={14} /> Join meeting
+                    </a>
+                  )}
+                  <span className="hidden md:inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-700">
+                    Details <ChevronRight size={14} />
+                  </span>
+                </div>
               </div>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {upcomingMeetings.map((m) => {
-                  const d = m.meetingDate ? new Date(m.meetingDate) : null;
-                  return (
-                    <li key={m.id}>
-                      <button onClick={() => openMeeting(m)} className="w-full px-5 py-3 flex items-center gap-3 hover:bg-slate-50 transition-colors text-left">
-                        <div className="flex flex-col items-center justify-center w-11 shrink-0 rounded-lg border border-slate-200 bg-white py-1">
-                          <span className="text-[9px] font-semibold text-slate-500 uppercase tracking-wider">{d ? d.toLocaleDateString("en-US", { month: "short" }) : "—"}</span>
-                          <span className="text-base font-bold text-slate-900 leading-none tabular-nums my-0.5">{d ? d.getDate() : "—"}</span>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-bold text-slate-900 truncate">{m.companyName}</p>
-                          <p className="text-[11px] text-slate-500 truncate">{m.contactName}</p>
-                          <p className="text-[10px] text-slate-400 tabular-nums mt-0.5 inline-flex items-center gap-1">
-                            <Clock size={9} /> {m.meetingTime || "—"}
-                          </p>
-                        </div>
+            </button>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white px-6 py-5 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400">
+                <Calendar size={20} />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-slate-700">No upcoming meetings scheduled</p>
+                <p className="text-xs text-slate-500 mt-0.5">Your past meetings are below. New ones will appear here as Thyleads books them.</p>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <PulseCard label="This week" value={thisWeekScheduled} sub="upcoming meetings" icon={Calendar} accent="text-[#6800FF]" bg="bg-[#f0e6ff]" />
+            <PulseCard label="Awaiting your feedback" value={awaitingFeedbackCount} sub="completed, no remark" icon={MessageSquare} accent="text-amber-700" bg="bg-amber-50" />
+            <PulseCard label="Completed" value={doneCount} sub="all time" icon={CheckCircle2} accent="text-emerald-700" bg="bg-emerald-50" />
+            <PulseCard label="In pipeline" value={pipelineCount} sub="being qualified" icon={Sparkles} accent="text-sky-700" bg="bg-sky-50" />
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+            <div className="xl:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-200 flex flex-col md:flex-row md:items-center gap-3">
+                <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
+                  {filterChips.map((chip) => {
+                    const active = (chip.key === "all" && statusFilter === "all") || statusFilter === chip.key;
+                    return (
+                      <button
+                        key={chip.key}
+                        onClick={() => setStatusFilter(chip.key)}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                          active
+                            ? "bg-[#6800FF] text-white border-[#6800FF]"
+                            : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        {chip.label}
+                        <span className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded ${active ? "bg-white/20" : "bg-slate-100 text-slate-500"}`}>{chip.count}</span>
                       </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <User size={14} className="text-[#6800FF]" />
-                Your Thyleads team
-              </h3>
-              <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md tabular-nums">{teamMembers.length}</span>
-            </div>
-            {teamMembers.length === 0 ? (
-              <div className="px-5 py-8 text-center">
-                <p className="text-xs text-slate-400">No team members assigned yet</p>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="relative w-48">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
+                    <input
+                      type="text"
+                      placeholder="Search…"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="w-full pl-7 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10"
+                    />
+                  </div>
+                  <select
+                    value={monthFilter}
+                    onChange={(e) => setMonthFilter(e.target.value)}
+                    className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10"
+                  >
+                    <option value="all">All months</option>
+                    {months.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
               </div>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {teamMembers.map((t) => (
-                  <li key={`${t.role}:${t.name}`} className="px-5 py-3 flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#f0e6ff] to-[#e0ccff] text-[#6800FF] flex items-center justify-center text-sm font-bold shrink-0">
-                      {t.name[0]?.toUpperCase()}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-bold text-slate-900 truncate">{t.name}</p>
-                      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{t.role}</p>
-                    </div>
-                    <span className="text-[11px] text-slate-400 tabular-nums">{t.count}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <MessageSquare size={14} className="text-[#6800FF]" />
-                Recent activity
-              </h3>
-              <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md tabular-nums">{recentRemarkItems.length}</span>
-            </div>
-            {recentRemarkItems.length === 0 ? (
-              <div className="px-5 py-8 text-center">
-                <p className="text-xs text-slate-400">No remarks added yet</p>
-                <p className="text-[10px] text-slate-400 mt-1">Click any meeting to add a remark</p>
-              </div>
-            ) : (
-              <ul className="divide-y divide-slate-100">
-                {recentRemarkItems.map(({ meeting, remark }) => (
-                  <li key={meeting.id}>
-                    <button onClick={() => openMeeting(meeting)} className="w-full px-5 py-3 text-left hover:bg-slate-50 transition-colors">
-                      <div className="flex items-center justify-between mb-1">
-                        <p className="text-[13px] font-bold text-slate-900 truncate">{meeting.companyName}</p>
-                        <p className="text-[10px] text-slate-400 shrink-0 ml-2">{fmtRelative(remark.updatedAt)}</p>
+              {loading ? (
+                <div className="flex items-center justify-center py-20">
+                  <Loader2 size={20} className="text-[#6800FF] animate-spin" />
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="text-center py-16 px-6">
+                  <div className="w-12 h-12 rounded-full bg-slate-100 mx-auto mb-3 flex items-center justify-center">
+                    <Calendar size={18} className="text-slate-400" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-700">No meetings match</p>
+                  <p className="text-xs text-slate-400 mt-1">{search || statusFilter !== "all" || monthFilter !== "all" ? "Try clearing your filters" : "Your meetings will appear here"}</p>
+                </div>
+              ) : (
+                <div className="max-h-[640px] overflow-y-auto">
+                  {orderedBuckets.map(([bucketKey, group, label]) => {
+                    const isPriorityBucket = bucketKey === "today" || bucketKey === "tomorrow" || bucketKey === "this-week";
+                    return (
+                      <div key={bucketKey}>
+                        <div className="px-5 py-2 bg-slate-50/80 backdrop-blur-sm border-y border-slate-100 flex items-center justify-between sticky top-0 z-10">
+                          <p className={`text-[11px] font-bold uppercase tracking-wider ${isPriorityBucket ? "text-[#6800FF]" : "text-slate-600"}`}>{label}</p>
+                          <p className="text-[11px] font-semibold text-slate-400 tabular-nums">{group.length}</p>
+                        </div>
+                        <div className="divide-y divide-slate-100">
+                          {group.map((m) => {
+                            const dotColor = m.meetingStatus === "done" ? "bg-emerald-500" : m.meetingStatus === "scheduled" ? "bg-blue-500" : "bg-amber-500";
+                            const rm = remarks[m.meetingId];
+                            const hasRemark = !!rm?.remark;
+                            const dateObj = m.meetingDate ? new Date(m.meetingDate) : null;
+                            const dayNum = dateObj ? dateObj.getDate() : "—";
+                            const weekday = dateObj ? dateObj.toLocaleDateString("en-US", { weekday: "short" }) : "";
+                            const dt = parseMeetingDateTime(m.meetingDate, m.meetingTime);
+                            const isUpcomingScheduled = m.meetingStatus === "scheduled" && dt && dt.getTime() > nowMs;
+                            return (
+                              <button
+                                key={m.id}
+                                onClick={() => openMeeting(m)}
+                                className="w-full px-5 py-3 flex items-center gap-4 text-left hover:bg-slate-50 transition-colors group"
+                              >
+                                <div className={`shrink-0 w-11 h-11 rounded-xl flex flex-col items-center justify-center transition-colors ${
+                                  isPriorityBucket ? "bg-[#6800FF] text-white" : "border border-slate-200 bg-white text-slate-900 group-hover:border-[#6800FF]/40"
+                                }`}>
+                                  <span className="text-base font-bold leading-none tabular-nums">{dayNum}</span>
+                                  <span className={`text-[9px] font-medium mt-0.5 uppercase ${isPriorityBucket ? "opacity-70" : "text-slate-400"}`}>{weekday}</span>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
+                                    <p className="text-sm font-bold text-slate-900 truncate">{m.companyName}</p>
+                                    {hasRemark && (
+                                      <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-[#6800FF]" title="You added a remark">
+                                        <MessageSquare size={9} />
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-0.5 truncate">
+                                    {m.contactName}{m.contactTitle ? <span className="text-slate-400"> · {m.contactTitle}</span> : null}
+                                  </p>
+                                </div>
+                                <div className="shrink-0 flex items-center gap-3">
+                                  <span className="text-xs font-semibold text-slate-700 tabular-nums whitespace-nowrap">{m.meetingTime || "—"}</span>
+                                  {isUpcomingScheduled && m.meetingLink ? (
+                                    <a
+                                      href={m.meetingLink}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-[#6800FF]/5 text-[#6800FF] hover:bg-[#6800FF]/10 transition-colors"
+                                    >
+                                      <Video size={11} /> Join
+                                    </a>
+                                  ) : (
+                                    <ChevronRight size={14} className="text-slate-300 group-hover:text-[#6800FF] transition-colors" />
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
-                      <p className="text-[11px] text-slate-600 line-clamp-2 leading-relaxed">{remark.remark}</p>
-                      {remark.updatedBy && (
-                        <p className="text-[10px] text-slate-400 mt-1.5">by {remark.updatedBy}</p>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <aside className="space-y-5">
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <MessageSquare size={14} className="text-[#6800FF]" />
+                    Recent feedback
+                  </h3>
+                  <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md tabular-nums">{recentRemarkItems.length}</span>
+                </div>
+                {recentRemarkItems.length === 0 ? (
+                  <div className="px-5 py-8 text-center">
+                    <p className="text-xs text-slate-500 font-medium">No remarks yet</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Click any meeting to share feedback with your Thyleads team.</p>
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-slate-100">
+                    {recentRemarkItems.map(({ meeting, remark }) => (
+                      <li key={meeting.id}>
+                        <button onClick={() => openMeeting(meeting)} className="w-full px-5 py-3 text-left hover:bg-slate-50 transition-colors">
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="text-[13px] font-bold text-slate-900 truncate">{meeting.companyName}</p>
+                            <p className="text-[10px] text-slate-400 shrink-0 ml-2">{fmtRelative(remark.updatedAt)}</p>
+                          </div>
+                          <p className="text-[11px] text-slate-600 line-clamp-3 leading-relaxed">{remark.remark}</p>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {teamMembers.length > 0 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Working with you</p>
+                  </div>
+                  <ul className="px-5 py-3 flex flex-wrap gap-2">
+                    {teamMembers.map((t) => (
+                      <li key={`${t.role}:${t.name}`} className="inline-flex items-center gap-2 px-2 py-1 bg-slate-50 rounded-lg" title={t.role}>
+                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-[#f0e6ff] to-[#e0ccff] text-[#6800FF] flex items-center justify-center text-[10px] font-bold">
+                          {t.name[0]?.toUpperCase()}
+                        </div>
+                        <span className="text-xs font-semibold text-slate-700">{t.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </aside>
           </div>
-        </aside>
         </div>
+        );})()}
       </div>
 
       {selected && (
@@ -652,5 +837,235 @@ export default function ClientPortal() {
         </>
       )}
     </div>
+  );
+}
+
+type CampaignsSectionProps = {
+  smartlead: {
+    campaigns: Array<{
+      campaign_id: number;
+      name: string;
+      status: string;
+      sent_count?: number;
+      open_count?: number;
+      unique_open_count?: number;
+      reply_count?: number;
+      click_count?: number;
+      unique_click_count?: number;
+      bounce_count?: number;
+      unsubscribed_count?: number;
+    }>;
+    totals: {
+      sent: number; opens: number; replies: number; clicks: number; bounces: number; unsubscribes: number;
+      openRate: number; replyRate: number; clickRate: number; bounceRate: number; unsubscribeRate: number;
+    };
+    configured: boolean;
+    reason?: string;
+  } | null;
+  loading: boolean;
+  error: string;
+};
+
+function CampaignsSection({ smartlead, loading, error }: CampaignsSectionProps) {
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-5 flex items-center gap-2 text-sm text-slate-500">
+        <Loader2 size={14} className="animate-spin" /> Loading campaign metrics…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5 text-sm text-amber-800">
+        Couldn&apos;t load Smartlead campaigns: {error}
+      </div>
+    );
+  }
+  if (!smartlead || !smartlead.configured) {
+    const reason = smartlead?.reason;
+    if (reason === "no-name-match") {
+      return (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-5">
+          <div className="px-6 py-4 border-b border-slate-200">
+            <h2 className="text-base font-bold text-slate-900">Outbound campaigns</h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">No Smartlead campaigns matched this account&apos;s name yet.</p>
+          </div>
+          <div className="p-6 text-sm text-slate-600 leading-relaxed">
+            <p>Your Thyleads admin can attach specific Smartlead campaigns to this account from the dashboard if name-based matching isn&apos;t catching them.</p>
+          </div>
+        </div>
+      );
+    }
+    const isKeyMissing = reason === "no-key";
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-5">
+        <div className="px-6 py-4 border-b border-slate-200">
+          <h2 className="text-base font-bold text-slate-900">Outbound campaigns</h2>
+          <p className="text-[11px] text-slate-500 mt-0.5">Live Smartlead performance — Sent, Opens, Replies, Clicks, Bounces, Unsubscribes</p>
+        </div>
+        <div className="p-6 text-sm leading-relaxed space-y-2 text-slate-600">
+          {isKeyMissing ? (
+            <p>Smartlead isn&apos;t connected on the server yet. Thyleads needs to set <code className="px-1 py-0.5 bg-slate-100 rounded text-[11px] font-mono">SMARTLEAD_API_KEY</code> and restart.</p>
+          ) : (
+            <p>No campaigns are showing up for this account yet. Reach out to your Thyleads team if you expected to see live metrics here.</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+  if (smartlead.campaigns.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-5">
+        <div className="px-6 py-4 border-b border-slate-200">
+          <h2 className="text-base font-bold text-slate-900">Outbound campaigns</h2>
+          <p className="text-[11px] text-slate-500 mt-0.5">No campaigns returned from Smartlead — check the configured IDs.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const { campaigns, totals } = smartlead;
+  const summary: Array<{ label: string; value: string; sub: string; icon: typeof Send; accent: string; bg: string }> = [
+    { label: "Sent",         value: totals.sent.toLocaleString(),         sub: `${campaigns.length} campaign${campaigns.length === 1 ? "" : "s"}`, icon: Send,          accent: "text-slate-700",   bg: "bg-slate-50" },
+    { label: "Open rate",    value: `${totals.openRate}%`,                sub: `${totals.opens.toLocaleString()} opens`,                            icon: MailOpen,      accent: "text-emerald-700", bg: "bg-emerald-50" },
+    { label: "Reply rate",   value: `${totals.replyRate}%`,               sub: `${totals.replies.toLocaleString()} replies`,                        icon: Reply,         accent: "text-[#6800FF]",   bg: "bg-[#f0e6ff]" },
+    { label: "Click rate",   value: `${totals.clickRate}%`,               sub: `${totals.clicks.toLocaleString()} clicks`,                          icon: MousePointer2, accent: "text-sky-700",     bg: "bg-sky-50" },
+    { label: "Bounce rate",  value: `${totals.bounceRate}%`,              sub: `${totals.bounces.toLocaleString()} bounces`,                        icon: AlertTriangle, accent: "text-amber-700",   bg: "bg-amber-50" },
+    { label: "Unsub rate",   value: `${totals.unsubscribeRate}%`,         sub: `${totals.unsubscribes.toLocaleString()} unsubs`,                    icon: MailX,         accent: "text-rose-700",    bg: "bg-rose-50" },
+  ];
+
+  return (
+    <div className="space-y-5 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {summary.map((c) => {
+          const Icon = c.icon;
+          return (
+            <div key={c.label} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{c.label}</p>
+                <div className={`inline-flex items-center justify-center w-7 h-7 rounded-lg ${c.bg} ${c.accent}`}>
+                  <Icon size={13} />
+                </div>
+              </div>
+              <p className="text-2xl font-bold text-slate-900 tabular-nums mt-2">{c.value}</p>
+              <p className="text-[10px] text-slate-500 mt-1">{c.sub}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="text-base font-bold text-slate-900">Campaigns</h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">All campaigns running for your account</p>
+          </div>
+          <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md tabular-nums">{campaigns.length}</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50/60 border-b border-slate-200 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              <tr>
+                <th className="text-left px-6 py-3">Campaign</th>
+                <th className="text-left px-3 py-3">Status</th>
+                <th className="text-right px-3 py-3">Sent</th>
+                <th className="text-right px-3 py-3">Open</th>
+                <th className="text-right px-3 py-3">Reply</th>
+                <th className="text-right px-3 py-3">Click</th>
+                <th className="text-right px-3 py-3">Bounce</th>
+                <th className="text-right px-6 py-3">Unsub</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {campaigns.map((c) => {
+                const toNum = (v: unknown) => {
+                  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+                  if (typeof v === "string") { const p = Number(v); return Number.isFinite(p) ? p : 0; }
+                  return 0;
+                };
+                const sent = toNum(c.sent_count);
+                const opens = toNum(c.unique_open_count ?? c.open_count);
+                const replies = toNum(c.reply_count);
+                const clicks = toNum(c.unique_click_count ?? c.click_count);
+                const bounces = toNum(c.bounce_count);
+                const unsubs = toNum(c.unsubscribed_count);
+                const status = (c.status || "").toLowerCase();
+                const statusColor =
+                  status === "active" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                  status === "paused" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                  status === "completed" ? "bg-slate-100 text-slate-600 border-slate-200" :
+                  status === "drafted" ? "bg-slate-50 text-slate-500 border-slate-200" :
+                  "bg-slate-50 text-slate-500 border-slate-200";
+                const dotColor =
+                  status === "active" ? "bg-emerald-500" :
+                  status === "paused" ? "bg-amber-500" :
+                  status === "completed" ? "bg-slate-500" :
+                  "bg-slate-300";
+                return (
+                  <tr key={c.campaign_id} className="hover:bg-slate-50/60 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 truncate max-w-[280px]" title={c.name}>{c.name}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">#{c.campaign_id}</p>
+                      </div>
+                    </td>
+                    <td className="px-3 py-4">
+                      <span className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${statusColor}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${dotColor}`} />
+                        {c.status || "unknown"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-4 text-right">
+                      <p className="text-sm font-semibold text-slate-900 tabular-nums">{sent.toLocaleString()}</p>
+                    </td>
+                    <RateCell num={opens} den={sent} color="emerald" />
+                    <RateCell num={replies} den={sent} color="violet" />
+                    <RateCell num={clicks} den={sent} color="sky" />
+                    <RateCell num={bounces} den={sent} color="amber" />
+                    <RateCell num={unsubs} den={sent} color="rose" lastCol />
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PulseCard({ label, value, sub, icon: Icon, accent, bg }: { label: string; value: number; sub: string; icon: typeof Send; accent: string; bg: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{label}</p>
+        <div className={`inline-flex items-center justify-center w-7 h-7 rounded-lg ${bg} ${accent}`}>
+          <Icon size={13} />
+        </div>
+      </div>
+      <p className="text-2xl font-bold text-slate-900 tabular-nums mt-2">{value}</p>
+      <p className="text-[10px] text-slate-500 mt-1">{sub}</p>
+    </div>
+  );
+}
+
+function RateCell({ num, den, color, lastCol }: { num: number; den: number; color: "emerald" | "violet" | "sky" | "amber" | "rose"; lastCol?: boolean }) {
+  const pct = den > 0 ? (num / den) * 100 : 0;
+  const pctLabel = den > 0 ? `${Math.round(pct * 10) / 10}%` : "—";
+  const barColor = {
+    emerald: "bg-emerald-500",
+    violet: "bg-[#6800FF]",
+    sky: "bg-sky-500",
+    amber: "bg-amber-500",
+    rose: "bg-rose-500",
+  }[color];
+  return (
+    <td className={`py-4 text-right tabular-nums ${lastCol ? "px-6" : "px-3"}`}>
+      <p className="text-sm font-semibold text-slate-900">{num.toLocaleString()}</p>
+      <p className="text-[10px] text-slate-500 mt-0.5">{pctLabel}</p>
+      <div className="mt-1 h-1 bg-slate-100 rounded-full overflow-hidden w-20 ml-auto">
+        <div className={`h-full ${barColor} rounded-full`} style={{ width: `${Math.min(pct, 100)}%` }} />
+      </div>
+    </td>
   );
 }

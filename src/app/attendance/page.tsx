@@ -574,7 +574,7 @@ export default function AttendancePage() {
 
   const { hour: currentHour, minute: currentMin } = istParts(new Date(now));
   const currentTimeMin = currentHour * 60 + currentMin;
-  const punchAllowedFrom = 9 * 60 + 30;
+  const punchAllowedFrom = 10 * 60;
   const punchAllowedUntil = 23 * 60 + 59;
   const isPunchTimeAllowed = currentTimeMin >= punchAllowedFrom && currentTimeMin <= punchAllowedUntil;
 
@@ -663,10 +663,14 @@ export default function AttendancePage() {
             const daysInMonth = new Date(yyyy, mm, 0).getDate();
             const endDay = isCurrentMonth ? today.getDate() : daysInMonth;
 
+            const holidaySet = new Set(HOLIDAYS.map((h) => h.date));
             let workingDays = 0;
             for (let d = 1; d <= endDay; d++) {
               const wd = new Date(yyyy, mm - 1, d).getDay();
-              if (wd !== 0 && wd !== 6) workingDays++;
+              if (wd === 0 || wd === 6) continue;
+              const ds = `${yyyy}-${String(mm).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+              if (holidaySet.has(ds)) continue;
+              workingDays++;
             }
 
             const present = memberMonthRecords.filter((r) => r.status === "present").length;
@@ -703,17 +707,20 @@ export default function AttendancePage() {
               else break;
             }
 
-            const calendarCells: Array<{ day: number; dateStr: string; rec?: AttendanceRecord; isWeekend: boolean; isFuture: boolean; isToday: boolean; isWfh: boolean } | null> = [];
+            const calendarCells: Array<{ day: number; dateStr: string; rec?: AttendanceRecord; isWeekend: boolean; isHoliday: boolean; holidayName: string; isFuture: boolean; isToday: boolean; isWfh: boolean } | null> = [];
             for (let i = 0; i < firstWeekday; i++) calendarCells.push(null);
             for (let d = 1; d <= daysInMonth; d++) {
               const ds = `${yyyy}-${String(mm).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
               const rec = recMap.get(ds);
               const wd = new Date(yyyy, mm - 1, d).getDay();
+              const holiday = HOLIDAYS.find((h) => h.date === ds);
               calendarCells.push({
                 day: d,
                 dateStr: ds,
                 rec,
                 isWeekend: wd === 0 || wd === 6,
+                isHoliday: !!holiday,
+                holidayName: holiday?.name || "",
                 isFuture: ds > todayStr,
                 isToday: ds === todayStr,
                 isWfh: !!(rec && (rec as AttendanceRecord & { isWfh?: boolean }).isWfh),
@@ -722,8 +729,6 @@ export default function AttendancePage() {
 
             const pendingLeaves = memberLeaveHistory.filter((l) => l.status === "pending").length;
             const pendingRegs = memberRegularizeHistory.filter((r) => r.status === "pending").length;
-            const onTimeDays = memberMonthRecords.filter((r) => r.punchIn && r.punchIn <= "09:30").length;
-            const lateDays = memberMonthRecords.filter((r) => r.punchIn && r.punchIn > "09:30").length;
 
             return (
               <div className="space-y-4">
@@ -847,6 +852,7 @@ export default function AttendancePage() {
                         <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-400" />Half</span>
                         <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-indigo-400" />WFH</span>
                         <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-400" />Leave</span>
+                        <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-sky-400" />Holiday</span>
                         <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-rose-300" />Absent</span>
                       </div>
                     </div>
@@ -858,7 +864,7 @@ export default function AttendancePage() {
                     <div className="grid grid-cols-7 gap-1">
                       {calendarCells.map((c, i) => {
                         if (!c) return <div key={`e-${i}`} className="aspect-square" />;
-                        const { day, dateStr, rec, isWeekend, isFuture, isToday, isWfh } = c;
+                        const { day, dateStr, rec, isWeekend, isHoliday, holidayName, isFuture, isToday, isWfh } = c;
                         let cls = "bg-white text-slate-300 border-slate-100";
                         let dotColor = "";
                         if (isFuture) {
@@ -875,8 +881,12 @@ export default function AttendancePage() {
                         } else if (rec?.status === "leave") {
                           cls = "bg-red-50 text-red-900 border-red-200";
                           dotColor = "bg-red-500";
+                        } else if (isHoliday) {
+                          cls = "bg-sky-50 text-sky-900 border-sky-200";
+                          dotColor = "bg-sky-500";
                         } else if (isWeekend) {
-                          cls = "bg-slate-50 text-slate-400 border-slate-100";
+                          cls = "bg-sky-50 text-sky-900 border-sky-200";
+                          dotColor = "bg-sky-400";
                         } else {
                           cls = "bg-rose-50/50 text-rose-600 border-rose-100";
                           dotColor = "bg-rose-400";
@@ -885,10 +895,12 @@ export default function AttendancePage() {
                         if (rec) {
                           tooltipParts.push(`${rec.status}${isWfh ? " · WFH" : ""}`);
                           if (rec.punchIn) tooltipParts.push(`${to12h(rec.punchIn)} → ${rec.punchOut ? to12h(rec.punchOut) : "active"}`);
-                        } else if (!isFuture && !isWeekend) {
-                          tooltipParts.push("Absent");
+                        } else if (isHoliday) {
+                          tooltipParts.push(`Holiday · ${holidayName}`);
                         } else if (isWeekend) {
-                          tooltipParts.push("Weekend");
+                          tooltipParts.push("Holiday · Weekend");
+                        } else if (!isFuture) {
+                          tooltipParts.push("Absent");
                         }
                         return (
                           <div
@@ -935,18 +947,8 @@ export default function AttendancePage() {
                     </div>
 
                     <div className="bg-white border border-slate-200 rounded-2xl p-5">
-                      <h3 className="text-sm font-bold text-slate-900 mb-4">Punctuality & streaks</h3>
+                      <h3 className="text-sm font-bold text-slate-900 mb-4">Streaks & pending</h3>
                       <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">On time</p>
-                          <p className="text-xl font-bold text-emerald-600 tabular-nums mt-0.5">{onTimeDays}</p>
-                          <p className="text-[10px] text-slate-500">before 9:30 AM</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Late</p>
-                          <p className="text-xl font-bold text-amber-600 tabular-nums mt-0.5">{lateDays}</p>
-                          <p className="text-[10px] text-slate-500">after 9:30 AM</p>
-                        </div>
                         <div>
                           <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Current streak</p>
                           <p className="text-xl font-bold text-slate-900 tabular-nums mt-0.5">{currentStreak}<span className="text-sm text-slate-400 font-medium"> {currentStreak === 1 ? "day" : "days"}</span></p>
@@ -1516,7 +1518,7 @@ export default function AttendancePage() {
             </div>
           ) : !isPunchTimeAllowed && !isPunchedIn ? (
             <div className="w-full py-4 bg-slate-100 text-slate-400 font-semibold text-sm rounded-full text-center">
-              Punch available 9:30 AM – 11:59 PM
+              Punch available 10:00 AM – 11:59 PM
             </div>
           ) : (
             <button
@@ -1632,17 +1634,25 @@ export default function AttendancePage() {
                   const hasRecord = attendanceDates.has(dateStr);
                   const isMissed = missedDateSet.has(dateStr);
                   const isToday = day === todayNum;
+                  const wd = new Date(calYear, calMonth, day).getDay();
+                  const isWeekend = wd === 0 || wd === 6;
+                  const holidayMeta = HOLIDAYS.find((h) => h.date === dateStr);
+                  const isHoliday = !!holidayMeta;
+                  const isOffDay = isWeekend || isHoliday;
                   const isPast = !isToday && dateStr < todayDate && !hasRecord;
                   const regReq = regRequests.find((r) => r.date === dateStr);
+                  const holidayTitle = isHoliday ? `Holiday · ${holidayMeta!.name}` : isWeekend ? "Holiday · Weekend" : "";
                   return (
                     <div key={i} className="flex justify-center items-center aspect-square">
                       <button
                         onClick={() => { if (isPast || hasRecord) { setSelectedDay(dateStr); setCalExpanded(true); } }}
+                        title={holidayTitle || undefined}
                         className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-semibold transition-all ${
                           selectedDay === dateStr ? "ring-2 ring-[#6800FF] ring-offset-1" :
                           isToday ? "bg-[#6800FF] text-white shadow-sm" :
                           isMissed ? "bg-red-100 text-red-700 border border-red-300" :
                           hasRecord ? "border border-[#09090b] text-slate-900" :
+                          isOffDay ? "bg-sky-50 text-sky-700 border border-sky-200" :
                           regReq?.status === "pending" ? "bg-amber-100 text-amber-700" :
                           isPast ? "text-red-300" :
                           "text-slate-700"
@@ -1809,18 +1819,26 @@ export default function AttendancePage() {
                       const hasRecord = attendanceDates.has(dateStr);
                       const isMissed = missedDateSet.has(dateStr);
                       const isToday = day === todayNum;
+                      const wd = new Date(calYear, calMonth, day).getDay();
+                      const isWeekend = wd === 0 || wd === 6;
+                      const holidayMeta = HOLIDAYS.find((h) => h.date === dateStr);
+                      const isHoliday = !!holidayMeta;
+                      const isOffDay = isWeekend || isHoliday;
                       const isPast = !isToday && dateStr < todayDate && !hasRecord;
                       const regReq = regRequests.find((r) => r.date === dateStr);
                       const isSelected = selectedDay === dateStr;
+                      const holidayTitle = isHoliday ? `Holiday · ${holidayMeta!.name}` : isWeekend ? "Holiday · Weekend" : "";
                       return (
                         <div key={i} className="flex justify-center">
                           <button
                             onClick={() => { setSelectedDay(dateStr); setShowRegForm(false); }}
+                            title={holidayTitle || undefined}
                             className={`w-10 h-10 flex items-center justify-center rounded-xl text-sm font-semibold transition-all ${
                               isSelected ? "bg-[#6800FF] text-white shadow-lg shadow-[#6800FF]/20" :
                               isToday ? "bg-slate-900 text-white" :
                               isMissed ? "bg-red-100 text-red-700 border border-red-200 hover:bg-red-200" :
                               hasRecord ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" :
+                              isOffDay ? "bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100" :
                               regReq?.status === "pending" ? "bg-amber-50 text-amber-600 hover:bg-amber-100" :
                               regReq?.status === "approved" ? "bg-emerald-50 text-emerald-600" :
                               isPast ? "bg-red-50 text-red-400 hover:bg-red-100" :
@@ -1834,6 +1852,7 @@ export default function AttendancePage() {
                   <div className="flex flex-wrap items-center gap-3 mt-4 text-xs text-slate-400">
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-slate-900" /> Today</div>
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-emerald-50 border border-emerald-200" /> Present</div>
+                    <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-sky-50 border border-sky-200" /> Holiday</div>
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-red-100 border border-red-200" /> Error</div>
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-red-50 border border-red-200" /> Absent</div>
                     <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded bg-amber-50 border border-amber-200" /> Pending</div>

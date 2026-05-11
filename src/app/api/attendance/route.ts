@@ -21,11 +21,57 @@ function istNow() {
   };
 }
 
+const AUTO_PUNCH_OUT_TIME = "18:30";
+
+interface StaleRecord {
+  _id: unknown;
+  date: string;
+  punchIn?: string | null;
+  punchOut?: string | null;
+  prevMinutes?: number;
+  rePunchLog?: string;
+}
+
+async function autoClosePastSessions(filter: Record<string, unknown>) {
+  const { date: todayDate } = istNow();
+  const stale = await Attendance.find({
+    ...filter,
+    date: { $lt: todayDate },
+    punchIn: { $ne: null },
+    punchOut: null,
+  }).lean<StaleRecord[]>();
+  if (stale.length === 0) return;
+  for (const r of stale) {
+    if (!r.punchIn) continue;
+    const inTimeMs = new Date(`${r.date}T${r.punchIn}:00${IST_OFFSET}`).getTime();
+    const outTimeMs = new Date(`${r.date}T${AUTO_PUNCH_OUT_TIME}:00${IST_OFFSET}`).getTime();
+    const sessionMinutes = Math.max(0, Math.round((outTimeMs - inTimeMs) / 60000));
+    const totalMinutes = (r.prevMinutes || 0) + sessionMinutes;
+    const status = totalMinutes >= 240 ? "present" : "half-day";
+    const autoLog = `Auto punch-out at ${AUTO_PUNCH_OUT_TIME} (missed punch-out)`;
+    const newLog = r.rePunchLog ? `${r.rePunchLog}\n${autoLog}` : autoLog;
+    await Attendance.updateOne(
+      { _id: r._id },
+      {
+        $set: {
+          punchOut: AUTO_PUNCH_OUT_TIME,
+          totalMinutes,
+          status,
+          rePunchLog: newLog,
+          autoPunchOut: true,
+        },
+      },
+    );
+  }
+}
+
 export async function GET(req: NextRequest) {
   await connectDB();
   const userId = req.nextUrl.searchParams.get("userId");
   const date = req.nextUrl.searchParams.get("date");
   const month = req.nextUrl.searchParams.get("month");
+
+  if (userId) await autoClosePastSessions({ userId });
 
   if (userId && date) {
     const record = await Attendance.findOne({ userId, date }).lean();
@@ -44,6 +90,7 @@ export async function GET(req: NextRequest) {
 
   const all = req.nextUrl.searchParams.get("all");
   if (all === "true") {
+    await autoClosePastSessions({});
     const dateFilter = req.nextUrl.searchParams.get("dateFilter");
     const query = dateFilter ? { date: dateFilter } : {};
     const records = await Attendance.find(query).sort({ date: -1, userName: 1 }).limit(200).lean();

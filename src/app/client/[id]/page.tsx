@@ -77,10 +77,11 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const router = useRouter();
   const { user } = useAuth();
   const { pods, podMap } = usePods();
-  const { projects, details, addDetail, updateDetail, deleteDetail, metrics, addMetric, updateMetric, deleteMetric } = useData();
+  const { projects, details, addDetail, updateDetail, deleteDetail, metrics, addMetric, updateMetric, deleteMetric, updateProject } = useData();
   const { addNotification } = useNotifications();
 
   const isPod = user?.role === "pod" || user?.role === "superadmin";
+  const isAdmin = user?.role === "admin" || user?.role === "superadmin";
   const contactResize = useResizableCols(contactCols.map((c) => c.w));
   const metricResize = useResizableCols(metricCols.map((c) => c.w));
   const project = projects.find((p) => p.id === id);
@@ -111,6 +112,64 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [popupSummary, setPopupSummary] = useState("");
   const [clientRemarks, setClientRemarks] = useState<Record<string, { remark: string; updatedAt: string; updatedBy: string }>>({});
   const [celebration, setCelebration] = useState<string | null>(null);
+  const [smartleadIdsDraft, setSmartleadIdsDraft] = useState("");
+  const [smartleadSaving, setSmartleadSaving] = useState(false);
+  const [smartleadSavedAt, setSmartleadSavedAt] = useState(0);
+  const [smartleadPickerOpen, setSmartleadPickerOpen] = useState(false);
+  const [smartleadPickerLoading, setSmartleadPickerLoading] = useState(false);
+  const [smartleadPickerError, setSmartleadPickerError] = useState("");
+  const [smartleadPickerQuery, setSmartleadPickerQuery] = useState("");
+  const [smartleadPickerStatus, setSmartleadPickerStatus] = useState<"all" | "active" | "paused" | "completed" | "other">("all");
+  const [smartleadPickerCampaigns, setSmartleadPickerCampaigns] = useState<Array<{ id: number; name: string; status: string }>>([]);
+  useEffect(() => {
+    setSmartleadIdsDraft((project?.smartleadCampaignIds || []).join(", "));
+  }, [project?.smartleadCampaignIds]);
+  const smartleadCurrent = (project?.smartleadCampaignIds || []).join(", ");
+  const smartleadDirty = smartleadIdsDraft.trim() !== smartleadCurrent;
+  const selectedSmartleadIds = useMemo(
+    () => new Set(smartleadIdsDraft.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean)),
+    [smartleadIdsDraft],
+  );
+  async function saveSmartleadIds() {
+    if (!project) return;
+    setSmartleadSaving(true);
+    const ids = smartleadIdsDraft.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+    await Promise.resolve(updateProject(project.id, { smartleadCampaignIds: ids }));
+    setSmartleadSaving(false);
+    setSmartleadSavedAt(Date.now());
+    setTimeout(() => setSmartleadSavedAt(0), 2500);
+  }
+  async function openSmartleadPicker() {
+    if (!user?.email) return;
+    setSmartleadPickerOpen(true);
+    setSmartleadPickerError("");
+    setSmartleadPickerLoading(true);
+    setSmartleadPickerQuery(project?.clientName || "");
+    setSmartleadPickerStatus("all");
+    try {
+      const res = await fetch(`/api/smartlead/campaigns?actor=${encodeURIComponent(user.email)}`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) {
+        setSmartleadPickerError(data.error || "Failed to load campaigns");
+        setSmartleadPickerCampaigns([]);
+      } else {
+        setSmartleadPickerCampaigns((data.campaigns || []).map((c: { id: number; name: string; status: string }) => ({ id: c.id, name: c.name, status: c.status })));
+      }
+    } catch (e) {
+      setSmartleadPickerError(e instanceof Error ? e.message : "Network error");
+    }
+    setSmartleadPickerLoading(false);
+  }
+  function toggleSmartleadId(id: string) {
+    const ids = new Set(smartleadIdsDraft.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean));
+    if (ids.has(id)) ids.delete(id);
+    else ids.add(id);
+    setSmartleadIdsDraft(Array.from(ids).join(", "));
+  }
+  function setSmartleadSelection(ids: string[]) {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    setSmartleadIdsDraft(unique.join(", "));
+  }
 
   useEffect(() => {
     let ignore = false;
@@ -335,6 +394,222 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       </div>
 
       <div className="px-8 pb-8 space-y-8">
+
+        {isAdmin && (
+          <section className="bg-white border border-slate-200 rounded-xl p-4">
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold text-slate-800">Smartlead campaigns</h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">Pick the Smartlead campaigns this client&apos;s portal should surface. IDs are stored under the hood.</p>
+              </div>
+              <div className="flex items-center gap-2 flex-1 min-w-[260px] justify-end">
+                <input
+                  type="text"
+                  value={smartleadIdsDraft}
+                  onChange={(e) => setSmartleadIdsDraft(e.target.value)}
+                  placeholder="e.g. 12345, 67890"
+                  className="flex-1 max-w-md px-3 py-1.5 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]"
+                />
+                <button
+                  onClick={openSmartleadPicker}
+                  className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg transition-colors"
+                >
+                  Browse…
+                </button>
+                <button
+                  onClick={saveSmartleadIds}
+                  disabled={!smartleadDirty || smartleadSaving}
+                  className="px-3 py-1.5 bg-[#6800FF] hover:bg-[#5800DD] disabled:bg-slate-200 disabled:text-slate-500 text-white text-xs font-semibold rounded-lg transition-colors"
+                >
+                  {smartleadSaving ? "Saving…" : smartleadSavedAt ? "Saved ✓" : "Save"}
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {smartleadPickerOpen && (
+          <>
+            <div className="fixed inset-0 bg-slate-900/40 z-40" onClick={() => setSmartleadPickerOpen(false)} />
+            <div className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[80vh] overflow-hidden flex flex-col">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Pick Smartlead campaigns</h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Live list pulled from your Smartlead workspace</p>
+                </div>
+                <button onClick={() => setSmartleadPickerOpen(false)} className="p-1.5 rounded text-slate-400 hover:bg-slate-100">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="px-5 py-3 border-b border-slate-100 space-y-2">
+                <input
+                  type="text"
+                  value={smartleadPickerQuery}
+                  onChange={(e) => setSmartleadPickerQuery(e.target.value)}
+                  placeholder="Search campaigns by name or ID…"
+                  className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]"
+                />
+                {(() => {
+                  const counts = smartleadPickerCampaigns.reduce<Record<string, number>>((acc, c) => {
+                    const s = (c.status || "").toLowerCase();
+                    if (s === "active" || s === "paused" || s === "completed") acc[s] = (acc[s] || 0) + 1;
+                    else acc.other = (acc.other || 0) + 1;
+                    return acc;
+                  }, {});
+                  const chips: Array<{ key: typeof smartleadPickerStatus; label: string; count: number }> = [
+                    { key: "all", label: "All", count: smartleadPickerCampaigns.length },
+                    { key: "active", label: "Active", count: counts.active || 0 },
+                    { key: "paused", label: "Paused", count: counts.paused || 0 },
+                    { key: "completed", label: "Completed", count: counts.completed || 0 },
+                  ];
+                  if (counts.other) chips.push({ key: "other", label: "Other", count: counts.other });
+                  return (
+                    <div className="flex flex-wrap gap-1.5">
+                      {chips.map((chip) => {
+                        const active = smartleadPickerStatus === chip.key;
+                        const cls = active
+                          ? (chip.key === "active" ? "bg-emerald-600 text-white border-emerald-600"
+                            : chip.key === "paused" ? "bg-amber-500 text-white border-amber-500"
+                            : chip.key === "completed" ? "bg-slate-700 text-white border-slate-700"
+                            : "bg-[#6800FF] text-white border-[#6800FF]")
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50";
+                        return (
+                          <button
+                            key={chip.key}
+                            type="button"
+                            onClick={() => setSmartleadPickerStatus(chip.key)}
+                            className={`px-2.5 py-1 text-[11px] font-semibold rounded-full border transition-colors ${cls}`}
+                          >
+                            {chip.label} <span className="opacity-70">· {chip.count}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+              {!smartleadPickerLoading && !smartleadPickerError && smartleadPickerCampaigns.length > 0 && (() => {
+                const q = smartleadPickerQuery.trim().toLowerCase();
+                const matchesStatus = (c: { status: string }) => {
+                  if (smartleadPickerStatus === "all") return true;
+                  const s = (c.status || "").toLowerCase();
+                  if (smartleadPickerStatus === "other") return s !== "active" && s !== "paused" && s !== "completed";
+                  return s === smartleadPickerStatus;
+                };
+                const filteredIds = smartleadPickerCampaigns
+                  .filter(matchesStatus)
+                  .filter((c) => !q || c.name?.toLowerCase().includes(q) || String(c.id).includes(q))
+                  .map((c) => String(c.id));
+                const visibleCount = filteredIds.length;
+                const visibleSelectedCount = filteredIds.filter((id) => selectedSmartleadIds.has(id)).length;
+                const allVisibleSelected = visibleCount > 0 && visibleSelectedCount === visibleCount;
+                return (
+                  <div className="px-5 py-2 border-b border-slate-100 flex items-center justify-between gap-3 text-xs">
+                    <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        onChange={() => {
+                          const next = new Set(selectedSmartleadIds);
+                          if (allVisibleSelected) for (const id of filteredIds) next.delete(id);
+                          else for (const id of filteredIds) next.add(id);
+                          setSmartleadSelection(Array.from(next));
+                        }}
+                        className="h-3.5 w-3.5 accent-[#6800FF]"
+                      />
+                      <span className="font-semibold text-slate-700">
+                        {allVisibleSelected ? "Deselect all" : "Select all"}
+                        {q ? ` (${visibleCount} shown)` : ` (${visibleCount})`}
+                      </span>
+                    </label>
+                    {selectedSmartleadIds.size > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSmartleadSelection([])}
+                        className="text-slate-500 hover:text-red-600 font-medium"
+                      >
+                        Clear ({selectedSmartleadIds.size})
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+              <div className="flex-1 overflow-y-auto">
+                {smartleadPickerLoading && (
+                  <div className="px-5 py-10 text-sm text-slate-400 text-center">Loading campaigns…</div>
+                )}
+                {!smartleadPickerLoading && smartleadPickerError && (
+                  <div className="px-5 py-6 text-sm text-amber-700 bg-amber-50 m-4 rounded-lg">
+                    {smartleadPickerError}
+                    {smartleadPickerError.toLowerCase().includes("smartlead_api_key") && (
+                      <p className="mt-2 text-[11px] text-amber-700">Set <code className="px-1 py-0.5 bg-amber-100 rounded">SMARTLEAD_API_KEY</code> in <code className="px-1 py-0.5 bg-amber-100 rounded">.env.local</code> and restart the dev server.</p>
+                    )}
+                  </div>
+                )}
+                {!smartleadPickerLoading && !smartleadPickerError && (() => {
+                  const q = smartleadPickerQuery.trim().toLowerCase();
+                  const filtered = smartleadPickerCampaigns
+                    .filter((c) => {
+                      if (smartleadPickerStatus === "all") return true;
+                      const s = (c.status || "").toLowerCase();
+                      if (smartleadPickerStatus === "other") return s !== "active" && s !== "paused" && s !== "completed";
+                      return s === smartleadPickerStatus;
+                    })
+                    .filter((c) => {
+                      if (!q) return true;
+                      return c.name?.toLowerCase().includes(q) || String(c.id).includes(q);
+                    });
+                  if (filtered.length === 0) {
+                    return <div className="px-5 py-10 text-sm text-slate-400 text-center">{smartleadPickerCampaigns.length === 0 ? "No campaigns in this Smartlead workspace yet." : "No matches"}</div>;
+                  }
+                  return (
+                    <ul className="divide-y divide-slate-100">
+                      {filtered.map((c) => {
+                        const idStr = String(c.id);
+                        const checked = selectedSmartleadIds.has(idStr);
+                        const status = (c.status || "").toLowerCase();
+                        const statusCls =
+                          status === "active" ? "bg-emerald-50 text-emerald-700" :
+                          status === "paused" ? "bg-amber-50 text-amber-700" :
+                          status === "completed" ? "bg-slate-100 text-slate-600" :
+                          "bg-slate-50 text-slate-500";
+                        return (
+                          <li key={c.id}>
+                            <button
+                              type="button"
+                              onClick={() => toggleSmartleadId(idStr)}
+                              className={`w-full text-left px-5 py-3 hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 ${checked ? "bg-violet-50/40" : ""}`}
+                            >
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-slate-900 truncate">{c.name || `Campaign ${c.id}`}</p>
+                                <p className="text-[10px] text-slate-400 font-mono">#{c.id}</p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${statusCls}`}>{c.status || "unknown"}</span>
+                                <span className={`text-[10px] font-semibold ${checked ? "text-[#6800FF]" : "text-slate-400"}`}>
+                                  {checked ? "Selected ✓" : "+ Add"}
+                                </span>
+                              </div>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  );
+                })()}
+              </div>
+              <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-between">
+                <p className="text-[11px] text-slate-500">{selectedSmartleadIds.size} selected</p>
+                <button
+                  onClick={() => setSmartleadPickerOpen(false)}
+                  className="px-3 py-1.5 bg-[#6800FF] hover:bg-[#5800DD] text-white text-xs font-semibold rounded-lg"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </>
+        )}
 
         <section>
           <div className="flex items-center justify-between mb-3">

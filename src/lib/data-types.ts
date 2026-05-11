@@ -12,4 +12,5 @@ export interface ClientProject {
   websiteUrl?: string;
   logoUrl?: string;
   assignedMembers?: string[];
+  smartleadCampaignIds?: string[];
 }
