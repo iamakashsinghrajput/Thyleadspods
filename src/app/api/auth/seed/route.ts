@@ -30,6 +30,7 @@ export async function POST() {
   const tombstoneDocs = await DeletedSeedEmail.find({}).select("email").lean<{ email: string }[]>();
   const tombstones = new Set(tombstoneDocs.map((d) => (d.email || "").toLowerCase()));
 
+  let podsRestored = 0;
   for (const u of SEED_USERS) {
     if (tombstones.has(u.email.toLowerCase())) {
       tombstoned++;
@@ -37,6 +38,15 @@ export async function POST() {
     }
     const exists = await UserModel.findOne({ email: u.email });
     if (exists) {
+      // Backfill: a pod-role user with an empty podId is stuck on the admin
+      // dashboard (home page falls through). Restore the seed's pod assignment
+      // and clear the podIdOverridden flag so subsequent reconciles work.
+      if (exists.role === "pod" && !exists.podId && u.podId) {
+        exists.podId = u.podId;
+        (exists as unknown as { podIdOverridden?: boolean }).podIdOverridden = false;
+        await exists.save();
+        podsRestored++;
+      }
       const didReconcile = await reconcileRoleFromSeed(exists);
       if (!exists.password) {
         exists.password = await bcrypt.hash(u.password, 10);
@@ -62,5 +72,5 @@ export async function POST() {
     created++;
   }
 
-  return NextResponse.json({ created, reconciled, skipped, passwordsInstalled, tombstoned, purged });
+  return NextResponse.json({ created, reconciled, skipped, passwordsInstalled, tombstoned, purged, podsRestored });
 }

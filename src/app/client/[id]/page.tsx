@@ -2,7 +2,7 @@
 
 import { use, useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Search, X, Upload, Pickaxe, Plus, Pencil, Check, Download, CheckCircle2, CalendarClock, Clock, BarChart3 } from "lucide-react";
+import { ArrowLeft, Search, X, Upload, Pickaxe, Plus, Pencil, Check, Download } from "lucide-react";
 import { useData } from "@/lib/data-context";
 import { useAuth } from "@/lib/auth-context";
 import { useNotifications } from "@/lib/notification-context";
@@ -10,6 +10,7 @@ import { usePods } from "@/lib/pod-context";
 import type { ClientDetail, MeetingStatus } from "@/lib/client-data";
 import { fireSideCannons } from "@/lib/confetti-side-cannons";
 import ConfirmDelete from "@/components/confirm-delete";
+import CampaignDetails from "@/components/client/campaign-details";
 
 const inputClass = "w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20 focus:border-[#6800FF]";
 
@@ -660,49 +661,44 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             const target = project?.monthlyTargetInternal || 0;
             const remaining = Math.max(0, target - monthCounts.done);
             const targetPct = target > 0 ? Math.min(100, Math.round((monthCounts.done / target) * 100)) : 0;
-            const doneFooter = target === 0
-              ? "no target set"
+            const doneSub = target === 0
+              ? "No target set"
               : remaining === 0
-                ? "🏆 target hit!"
-                : `${remaining} more to go`;
+                ? "Target hit"
+                : `${targetPct}% of ${target}`;
             return (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-                <MeetingStatCard
-                  label="Done"
-                  value={monthCounts.done}
-                  pct={targetPct}
-                  pctLabel={target > 0 ? `${targetPct}% of ${target}` : ""}
-                  footerOverride={doneFooter}
-                  scope={monthFilter || "all months"}
-                  icon={CheckCircle2}
-                  accent="emerald"
-                />
-                <MeetingStatCard
-                  label="Scheduled"
-                  value={monthCounts.scheduled}
-                  pct={0}
-                  footerOverride="coming up next"
-                  scope={monthFilter || "all months"}
-                  icon={CalendarClock}
-                  accent="sky"
-                />
-                <MeetingStatCard
-                  label="Pipeline"
-                  value={monthCounts.pipeline}
-                  pct={0}
-                  footerOverride="in pipeline"
-                  scope={monthFilter || "all months"}
-                  icon={Clock}
-                  accent="amber"
-                />
-                <MeetingStatCard
+                <MeetingFilterCard
                   label="Total"
                   value={monthCounts.total}
-                  pct={100}
-                  scope={monthFilter || "all months"}
-                  icon={BarChart3}
-                  accent="violet"
-                  isTotal
+                  sub={monthFilter || "All months"}
+                  dot="slate"
+                  active={statusFilter === "all"}
+                  onClick={() => setStatusFilter("all")}
+                />
+                <MeetingFilterCard
+                  label="Pipeline"
+                  value={monthCounts.pipeline}
+                  sub="Being qualified"
+                  dot="amber"
+                  active={statusFilter === "pipeline"}
+                  onClick={() => setStatusFilter(statusFilter === "pipeline" ? "all" : "pipeline")}
+                />
+                <MeetingFilterCard
+                  label="Scheduled"
+                  value={monthCounts.scheduled}
+                  sub="Upcoming"
+                  dot="blue"
+                  active={statusFilter === "scheduled"}
+                  onClick={() => setStatusFilter(statusFilter === "scheduled" ? "all" : "scheduled")}
+                />
+                <MeetingFilterCard
+                  label="Done"
+                  value={monthCounts.done}
+                  sub={doneSub}
+                  dot="emerald"
+                  active={statusFilter === "done"}
+                  onClick={() => setStatusFilter(statusFilter === "done" ? "all" : "done")}
                 />
               </div>
             );
@@ -847,6 +843,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </div>
           </div>
         </section>
+
+        {project && (
+          <CampaignDetails projectId={project.id} actorEmail={user?.email || ""} />
+        )}
 
         <section>
           <div className="flex items-center justify-between mb-3">
@@ -1093,38 +1093,47 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   );
 }
 
-const ACCENT_STYLES: Record<string, { bgFrom: string; bgTo: string; border: string; iconBg: string; iconColor: string; bar: string; ring: string; label: string }> = {
-  emerald: { bgFrom: "from-emerald-50/80",  bgTo: "to-white", border: "border-emerald-200/70", iconBg: "bg-emerald-100", iconColor: "text-emerald-600", bar: "bg-emerald-500",  ring: "ring-emerald-100", label: "text-emerald-700" },
-  sky:     { bgFrom: "from-sky-50/80",       bgTo: "to-white", border: "border-sky-200/70",     iconBg: "bg-sky-100",     iconColor: "text-sky-600",     bar: "bg-sky-500",      ring: "ring-sky-100",     label: "text-sky-700" },
-  amber:   { bgFrom: "from-amber-50/80",     bgTo: "to-white", border: "border-amber-200/70",   iconBg: "bg-amber-100",   iconColor: "text-amber-600",   bar: "bg-amber-500",    ring: "ring-amber-100",   label: "text-amber-700" },
-  violet:  { bgFrom: "from-[#6800FF]/8",     bgTo: "to-white", border: "border-[#6800FF]/30",   iconBg: "bg-[#f0e6ff]",   iconColor: "text-[#6800FF]",   bar: "bg-[#6800FF]",    ring: "ring-[#6800FF]/10",  label: "text-[#6800FF]" },
+const FILTER_DOT: Record<string, string> = {
+  slate: "bg-slate-900",
+  amber: "bg-amber-500",
+  blue: "bg-blue-500",
+  emerald: "bg-emerald-500",
 };
 
-function MeetingStatCard({ label, value, pct, pctLabel, footerOverride, scope, icon: Icon, accent, isTotal = false }: { label: string; value: number; pct: number; pctLabel?: string; footerOverride?: string; scope: string; icon: React.ComponentType<{ size?: number; className?: string }>; accent: "emerald" | "sky" | "amber" | "violet"; isTotal?: boolean }) {
-  const a = ACCENT_STYLES[accent];
-  const showProgressBar = !isTotal && pct > 0;
+const FILTER_RING: Record<string, string> = {
+  slate: "ring-slate-900/15 border-slate-900",
+  amber: "ring-amber-500/15 border-amber-500",
+  blue: "ring-blue-500/15 border-blue-500",
+  emerald: "ring-emerald-500/15 border-emerald-500",
+};
+
+function MeetingFilterCard({ label, value, sub, dot, active, onClick }: {
+  label: string;
+  value: number;
+  sub: string;
+  dot: "slate" | "amber" | "blue" | "emerald";
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div className={`group relative bg-linear-to-br ${a.bgFrom} ${a.bgTo} border ${a.border} rounded-2xl p-4 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all ring-1 ${a.ring} overflow-hidden`}>
-      <div className="flex items-start justify-between mb-2">
-        <p className={`text-[10px] font-bold uppercase tracking-wider ${a.label}`}>{label}</p>
-        <div className={`p-2 rounded-xl ${a.iconBg} ${a.iconColor} shrink-0`}>
-          <Icon size={16} />
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`text-left bg-white border rounded-xl px-4 py-3.5 transition-all hover:border-slate-300 ${
+        active ? `ring-2 ${FILTER_RING[dot]}` : "border-slate-200"
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className={`w-1.5 h-1.5 rounded-full ${FILTER_DOT[dot]}`} />
+          <span className="text-[11px] font-semibold text-slate-600 uppercase tracking-wider">{label}</span>
         </div>
+        {active && <span className="text-[10px] font-semibold text-slate-400">Filtered</span>}
       </div>
-      <p className="text-3xl font-bold text-slate-900 tabular-nums tracking-tight leading-none">{value.toLocaleString()}</p>
-      <div className={`mt-2 inline-flex items-center px-2 py-0.5 rounded-md ${a.iconBg} ${a.label} text-[10px] font-semibold`}>
-        {footerOverride || scope}
-      </div>
-      {pctLabel && (
-        <p className="text-[10px] text-slate-400 mt-1.5 tabular-nums">{pctLabel}</p>
-      )}
-      <p className="text-[10px] text-slate-400 mt-1">in {scope}</p>
-      {showProgressBar && (
-        <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-          <div className={`h-full ${a.bar} transition-all duration-700`} style={{ width: `${Math.min(pct, 100)}%` }} />
-        </div>
-      )}
-    </div>
+      <p className="text-3xl font-bold text-slate-900 tabular-nums tracking-tight leading-none mt-3">{value.toLocaleString()}</p>
+      <p className="text-[11px] text-slate-500 mt-1.5">{sub}</p>
+    </button>
   );
 }
 

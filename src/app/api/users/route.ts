@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/mongodb";
 import UserModel from "@/lib/models/user";
 import DeletedSeedEmail from "@/lib/models/deleted-seed-email";
 import { SUPERADMIN_EMAIL } from "@/lib/user-approval";
-import { SEED_USERS, REMOVED_SEED_EMAILS } from "@/lib/seed-users";
+import { SEED_USERS, REMOVED_SEED_EMAILS, getSeedUser } from "@/lib/seed-users";
 
 const REMOVED_EMAIL_SET = new Set(REMOVED_SEED_EMAILS.map((e) => e.toLowerCase()));
 
@@ -102,6 +102,15 @@ export async function PATCH(req: NextRequest) {
   if (typeof body.role === "string" && ["superadmin", "admin", "pod", "client"].includes(body.role)) {
     update.role = body.role;
     update.roleOverridden = true;
+
+    if (body.role === "pod" && typeof body.podId !== "string") {
+      const target = await UserModel.findById(id).lean<{ email?: string }>();
+      const seed = target?.email ? getSeedUser(target.email) : undefined;
+      if (seed?.podId) {
+        update.podId = seed.podId;
+        update.podIdOverridden = false;
+      }
+    }
   }
   if (Object.keys(update).length === 0) return NextResponse.json({ error: "no fields to update" }, { status: 400 });
 

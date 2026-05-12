@@ -19,6 +19,7 @@ import {
   Send,
   Rocket,
   Shield,
+  Inbox,
 } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import { useData } from "@/lib/data-context";
@@ -112,6 +113,7 @@ export default function Sidebar() {
 
   const navItems = [
     { href: "/", icon: isAdmin ? LayoutDashboard : FolderKanban, label: isAdmin ? "Dashboard" : "My Projects", exact: true },
+    ...(isAdmin ? [{ href: "/inbox", icon: Inbox, label: "Master Inbox", exact: false }] : []),
     ...(isAdmin ? [{ href: "/onboarding", icon: Send, label: "Onboarding", exact: false }] : []),
     ...(isAdmin ? [{ href: "/outbound", icon: Rocket, label: "Outbound", exact: false }] : []),
     { href: "/attendance", icon: Clock, label: "Attendance", exact: false },
