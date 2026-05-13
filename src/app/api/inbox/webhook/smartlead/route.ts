@@ -102,16 +102,43 @@ async function persistInlineReply({ leadId, campaignId, event }: { leadId: numbe
   return true;
 }
 
+function isPlausibleId(v: unknown): boolean {
+  if (typeof v === "number") return Number.isFinite(v) && v > 0;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0;
+  }
+  return false;
+}
+
+// Walk the payload tree and find the first plausible numeric value for any
+// key matching the given predicate. Smartlead's webhook shape varies between
+// event types so we try every nested object.
+function findIdByKey(obj: unknown, keyMatches: (k: string) => boolean, seen = new WeakSet<object>()): number | null {
+  if (!obj || typeof obj !== "object") return null;
+  if (seen.has(obj as object)) return null;
+  seen.add(obj as object);
+  const o = obj as Record<string, unknown>;
+  for (const [k, v] of Object.entries(o)) {
+    if (keyMatches(k.toLowerCase()) && isPlausibleId(v)) return Number(v);
+  }
+  for (const v of Object.values(o)) {
+    if (v && typeof v === "object") {
+      const r = findIdByKey(v, keyMatches, seen);
+      if (r != null) return r;
+    }
+  }
+  return null;
+}
+
 function extractIds(e: WebhookEvent): { campaignId: number | null; leadId: number | null } {
-  const data = (e.data || {}) as Record<string, unknown>;
-  const c = e.campaign_id ?? e.campaignId ?? (data.campaign_id as number | string | undefined) ?? null;
-  const l = e.lead_id ?? e.leadId ?? (data.lead_id as number | string | undefined) ?? null;
-  const campaignId = c != null ? Number(c) : null;
-  const leadId = l != null ? Number(l) : null;
-  return {
-    campaignId: Number.isFinite(campaignId as number) ? (campaignId as number) : null,
-    leadId: Number.isFinite(leadId as number) ? (leadId as number) : null,
-  };
+  const campaignId = findIdByKey(e, (k) =>
+    k === "campaign_id" || k === "campaignid" || k === "sl_campaign_id" || k === "sl_campaignid" || k === "campaign"
+  );
+  const leadId = findIdByKey(e, (k) =>
+    k === "lead_id" || k === "leadid" || k === "sl_lead_id" || k === "sl_leadid" || k === "lead"
+  );
+  return { campaignId, leadId };
 }
 
 export async function POST(req: NextRequest) {
@@ -122,7 +149,11 @@ export async function POST(req: NextRequest) {
 
   let body: unknown;
   try { body = await req.json(); } catch { body = null; }
-  console.log("[smartlead-webhook] received:", JSON.stringify(body).slice(0, 500));
+  // Log the full payload so we can see Smartlead's real field shape.
+  console.log("[smartlead-webhook] received:", JSON.stringify(body));
+  if (body && typeof body === "object") {
+    console.log("[smartlead-webhook] top-level keys:", Object.keys(body as Record<string, unknown>).join(", "));
+  }
 
   // Normalize to an array of events. Smartlead may send a single event object
   // or { events: [...] } or an array directly.
