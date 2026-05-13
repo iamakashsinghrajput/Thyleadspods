@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { Inbox, Search, RefreshCw, Loader2, Mail, ChevronLeft, ChevronDown, ChevronRight, ArrowDownRight, ArrowUpRight, Check } from "lucide-react";
+import { Inbox, Search, RefreshCw, Loader2, Mail, MailOpen, Megaphone, ChevronLeft, ChevronDown, ChevronRight, ArrowDownRight, ArrowUpRight, Check } from "lucide-react";
 
 type Thread = {
   threadKey: string;
@@ -82,16 +82,16 @@ function relativeTime(iso?: string | null): string {
 function fmtThreadTime(iso?: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
-  const now = new Date();
-  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  const sameYear = d.getFullYear() === now.getFullYear();
-  if (sameDay) {
-    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-  }
-  if (sameYear) {
-    return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  }
-  return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  const month = d.toLocaleString("en-US", { month: "short" });
+  const day = d.getDate();
+  let h = d.getHours();
+  const ampm = h >= 12 ? "pm" : "am";
+  h = h % 12;
+  if (h === 0) h = 12;
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const hh = String(h).padStart(2, "0");
+  const year = d.getFullYear() === new Date().getFullYear() ? "" : `, ${d.getFullYear()}`;
+  return `${month} ${day}${year} at ${hh}:${mm} ${ampm}`;
 }
 
 function initials(first: string, last: string, email: string): string {
@@ -534,51 +534,47 @@ export default function MasterInboxPage() {
                   const name = `${t.leadFirstName} ${t.leadLastName}`.trim() || t.leadEmail || "Unknown";
                   const active = selectedKey === t.threadKey;
                   const catStyle = categoryStyle(t.category);
-                  const avatarStyle = avatarGradient(t.leadFirstName + t.leadLastName + t.leadEmail);
+                  const AvatarIcon = unread ? Mail : MailOpen;
                   return (
                     <li key={t.threadKey}>
                       <button
                         onClick={() => loadThread(t.threadKey)}
-                        className={`w-full text-left px-3.5 py-3 flex gap-3 transition-colors border-l-2 ${
+                        className={`w-full text-left px-4 py-3 flex gap-3 transition-colors border-l-2 ${
                           active
                             ? "bg-[#f0e6ff] border-l-[#6800FF]"
-                            : unread
-                              ? "border-l-[#6800FF]/30 hover:bg-slate-50"
-                              : "border-l-transparent hover:bg-slate-50"
+                            : "border-l-transparent hover:bg-slate-50"
                         }`}
                       >
                         <div
-                          className={`w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 shadow-sm ${active ? "bg-[#6800FF] text-white" : "text-white"}`}
-                          style={active ? undefined : { background: avatarStyle }}
+                          className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${
+                            active
+                              ? "bg-[#6800FF] border-[#6800FF] text-white"
+                              : "bg-white border-slate-200 text-slate-400"
+                          }`}
+                          aria-hidden
                         >
-                          {initials(t.leadFirstName, t.leadLastName, t.leadEmail)}
+                          <AvatarIcon size={15} />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <p className={`text-[13px] truncate ${unread ? "font-bold text-slate-900" : "font-medium text-slate-700"}`}>{name}</p>
-                            <span className="text-[10px] text-slate-400 shrink-0 ml-auto tabular-nums whitespace-nowrap" title={new Date(t.lastReplyAt).toLocaleString()}>{fmtThreadTime(t.lastReplyAt)}</span>
+                          <div className="flex items-baseline gap-2">
+                            <p className={`text-[13.5px] truncate ${unread ? "font-semibold text-slate-900" : "font-medium text-slate-700"}`}>{name}</p>
+                            <span className="text-[11px] text-slate-400 shrink-0 ml-auto tabular-nums whitespace-nowrap" title={new Date(t.lastReplyAt).toLocaleString()}>{fmtThreadTime(t.lastReplyAt)}</span>
                           </div>
-                          {t.leadCompany && (
-                            <p className="text-[11px] text-slate-500 truncate mt-0.5">{t.leadCompany}{t.leadTitle ? <span className="text-slate-400"> · {t.leadTitle}</span> : null}</p>
+                          {t.leadEmail && (
+                            <p className="text-[11.5px] text-slate-500 truncate mt-0.5">{t.leadEmail}</p>
                           )}
-                          {(t.lastReplySubject || t.lastReplyPreview) && (
-                            <p className={`text-[11px] truncate mt-0.5 ${unread ? "text-slate-700 font-medium" : "text-slate-500"}`}>
-                              {t.lastReplySubject || t.lastReplyPreview}
-                            </p>
-                          )}
-                          <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                            {t.campaignName && (
-                              <span className="inline-flex items-center text-[10px] font-medium text-slate-500 bg-slate-100 rounded px-1.5 py-0.5 truncate max-w-[160px]" title={t.campaignName}>
-                                {t.campaignName}
-                              </span>
-                            )}
+                          <p className="text-[12px] text-slate-600 mt-1.5">Got reply from the lead</p>
+                          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                             {t.category && (
-                              <span className={`inline-flex items-center text-[10px] font-semibold rounded px-1.5 py-0.5 border ${catStyle.bg} ${catStyle.text} ${catStyle.border}`}>
+                              <span className={`inline-flex items-center text-[11px] font-semibold rounded-md px-2 py-0.5 border ${catStyle.bg} ${catStyle.text} ${catStyle.border}`}>
                                 {t.category}
                               </span>
                             )}
-                            {t.replyCount > 1 && (
-                              <span className="text-[10px] text-slate-400">{t.replyCount} replies</span>
+                            {t.campaignName && (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-2 py-0.5 truncate max-w-[200px]" title={t.campaignName}>
+                                <Megaphone size={10} className="text-slate-400 shrink-0" />
+                                <span className="truncate">{t.campaignName}</span>
+                              </span>
                             )}
                           </div>
                         </div>
