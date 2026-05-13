@@ -36,11 +36,13 @@ function extractIds(e: WebhookEvent): { campaignId: number | null; leadId: numbe
 
 export async function POST(req: NextRequest) {
   if (!authorized(req)) {
+    console.warn("[smartlead-webhook] rejected: secret mismatch");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   let body: unknown;
   try { body = await req.json(); } catch { body = null; }
+  console.log("[smartlead-webhook] received:", JSON.stringify(body).slice(0, 500));
 
   // Normalize to an array of events. Smartlead may send a single event object
   // or { events: [...] } or an array directly.
@@ -81,10 +83,14 @@ export async function POST(req: NextRequest) {
     { upsert: true },
   );
 
+  const targetList = Array.from(targets);
+  const detailed = results.map((r, i) => ({ key: targetList[i], messages: r.messages, error: r.error }));
+  console.log("[smartlead-webhook] processed:", targets.size, "results:", JSON.stringify(detailed).slice(0, 500));
+
   return NextResponse.json({
     ok: true,
     processed: targets.size,
-    results: results.map((r, i) => ({ key: Array.from(targets)[i], messages: r.messages, error: r.error })),
+    results: detailed,
   });
 }
 

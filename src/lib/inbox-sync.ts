@@ -365,13 +365,26 @@ export async function syncMasterInbox(): Promise<{ campaigns: number; threads: n
   }
 }
 
+function parseFromAddress(raw: string | undefined): { email: string; first: string; last: string } {
+  const s = (raw || "").trim();
+  if (!s) return { email: "", first: "", last: "" };
+  const m = s.match(/^(?:"?([^"<]+?)"?\s*)?<([^>]+)>$/);
+  let email = s;
+  let name = "";
+  if (m) { name = (m[1] || "").trim(); email = m[2].trim(); }
+  else if (s.includes("@")) email = s;
+  const [first = "", ...rest] = name.split(/\s+/);
+  return { email, first, last: rest.join(" ") };
+}
+
 export async function syncThreadMessages(leadId: number, campaignId: number): Promise<{ messages: number; error?: string }> {
   try {
+    const threadKey = makeThreadKey(leadId, campaignId);
     const history = await fetchLeadMessageHistory(String(campaignId), String(leadId));
     if (history.length === 0) {
       await connectDB();
       await InboxThread.updateOne(
-        { threadKey: makeThreadKey(leadId, campaignId) },
+        { threadKey },
         { $set: { messageHistorySyncedAt: new Date() } },
       );
       return { messages: 0 };
@@ -386,7 +399,7 @@ export async function syncThreadMessages(leadId: number, campaignId: number): Pr
         {
           $set: {
             messageId,
-            threadKey: makeThreadKey(leadId, campaignId),
+            threadKey,
             leadId,
             campaignId,
             time,
@@ -397,7 +410,6 @@ export async function syncThreadMessages(leadId: number, campaignId: number): Pr
             toEmail: m.to || "",
             openCount: m.open_count || 0,
             clickCount: m.click_count || 0,
-            raw: m,
             syncedAt: new Date(),
           },
         },
@@ -408,18 +420,29 @@ export async function syncThreadMessages(leadId: number, campaignId: number): Pr
 
     const replyMessages = history.filter((m) => isReplyType(m.type));
     const last = replyMessages[replyMessages.length - 1] || history[history.length - 1];
-    await InboxThread.updateOne(
-      { threadKey: makeThreadKey(leadId, campaignId) },
-      {
-        $set: {
-          messageHistorySyncedAt: new Date(),
-          lastReplyPreview: previewFromHtml(last?.email_body || ""),
-          lastReplySubject: last?.subject || "",
-          replyCount: replyMessages.length || 1,
-          lastReplyAt: parseDate(last?.time) || new Date(),
-        },
-      },
-    );
+
+    // If this thread doesn't exist yet (webhook fired for a brand-new lead),
+    // populate the lead info from the reply message so it shows up in the UI.
+    const existing = await InboxThread.findOne({ threadKey }).lean<{ leadEmail?: string }>();
+    const leadFromAddr = parseFromAddress(replyMessages[0]?.from || last?.from);
+    const setFields: Record<string, unknown> = {
+      threadKey,
+      leadId,
+      campaignId,
+      messageHistorySyncedAt: new Date(),
+      lastReplyPreview: previewFromHtml(last?.email_body || ""),
+      lastReplySubject: last?.subject || "",
+      replyCount: replyMessages.length || 1,
+      lastReplyAt: parseDate(last?.time) || new Date(),
+      syncedAt: new Date(),
+    };
+    if (!existing) {
+      setFields.leadEmail = leadFromAddr.email;
+      setFields.leadFirstName = leadFromAddr.first;
+      setFields.leadLastName = leadFromAddr.last;
+      setFields.campaignName = setFields.campaignName || `Campaign ${campaignId}`;
+    }
+    await InboxThread.updateOne({ threadKey }, { $set: setFields }, { upsert: true });
 
     return { messages: history.length };
   } catch (e) {
