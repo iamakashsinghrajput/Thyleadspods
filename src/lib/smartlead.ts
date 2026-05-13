@@ -424,6 +424,28 @@ export interface SmartleadLeadCategory {
   description?: string;
 }
 
+export async function updateLeadCategory(campaignId: string, leadId: string, categoryId: number): Promise<void> {
+  const key = apiKey();
+  const url = `${BASE_URL}/campaigns/${encodeURIComponent(campaignId)}/leads/${encodeURIComponent(leadId)}/category?api_key=${encodeURIComponent(key)}`;
+  await waitForRateBudget();
+  await acquireSlot();
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify({ category_id: categoryId }),
+    });
+  } finally {
+    releaseSlot();
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Smartlead ${res.status}: ${body.slice(0, 240) || res.statusText}`);
+  }
+}
+
 export async function fetchLeadCategories(): Promise<SmartleadLeadCategory[]> {
   try {
     const data = await smartleadFetch<SmartleadLeadCategory[] | { categories?: SmartleadLeadCategory[] }>(`/leads/fetch-categories`);

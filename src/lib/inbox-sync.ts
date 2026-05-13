@@ -11,7 +11,7 @@ import {
   type SmartleadLeadRow,
 } from "@/lib/smartlead";
 
-export const INBOX_STALE_MS = 5 * 60_000;
+export const INBOX_STALE_MS = 60_000;
 const HEARTBEAT_TIMEOUT_MS = 2 * 60_000;
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const LEADS_PAGE_SIZE = 100;

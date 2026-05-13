@@ -5,6 +5,7 @@ import { SUPERADMIN_EMAIL } from "@/lib/user-approval";
 import InboxThread from "@/lib/models/inbox-thread";
 import InboxMessage from "@/lib/models/inbox-message";
 import { syncThreadMessages } from "@/lib/inbox-sync";
+import { updateLeadCategory } from "@/lib/smartlead";
 
 async function actorRole(email: string): Promise<string> {
   if ((email || "").toLowerCase() === SUPERADMIN_EMAIL) return "superadmin";
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ lead
 
   const [updatedThread, messages] = await Promise.all([
     InboxThread.findOne({ threadKey }).lean(),
-    InboxMessage.find({ threadKey }).sort({ time: 1 }).lean(),
+    InboxMessage.find({ threadKey }).sort({ time: -1 }).lean(),
   ]);
 
   return NextResponse.json({ thread: updatedThread, messages });
@@ -76,6 +77,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ lea
   if (body.action === "mark-unread") {
     await InboxThread.updateOne({ threadKey }, { $set: { locallyReadAt: null } });
     return NextResponse.json({ ok: true });
+  }
+  if (body.action === "set-category") {
+    const categoryId = Number(body.categoryId);
+    const categoryName = String(body.categoryName || "");
+    if (!Number.isFinite(categoryId)) {
+      return NextResponse.json({ error: "categoryId required" }, { status: 400 });
+    }
+    try {
+      await updateLeadCategory(String(campaignId), String(leadId), categoryId);
+    } catch (e) {
+      return NextResponse.json({ error: e instanceof Error ? e.message : "Smartlead update failed" }, { status: 502 });
+    }
+    await InboxThread.updateOne({ threadKey }, { $set: { category: categoryName } });
+    return NextResponse.json({ ok: true, category: categoryName });
   }
   return NextResponse.json({ error: "unknown action" }, { status: 400 });
 }
