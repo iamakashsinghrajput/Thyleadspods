@@ -9,6 +9,7 @@ import {
   fetchLead,
   fetchLeadMessageHistory,
   fetchLeadCategories,
+  invalidateSmartleadCache,
   type SmartleadMessageHistoryItem,
   type SmartleadLeadRow,
 } from "@/lib/smartlead";
@@ -395,10 +396,15 @@ function parseFromAddress(raw: string | undefined): { email: string; first: stri
   return { email, first, last: rest.join(" ") };
 }
 
-export async function syncThreadMessages(leadId: number, campaignId: number): Promise<{ messages: number; error?: string }> {
+export async function syncThreadMessages(leadId: number, campaignId: number, opts?: { force?: boolean }): Promise<{ messages: number; error?: string }> {
   try {
     const threadKey = makeThreadKey(leadId, campaignId);
-    const history = await fetchLeadMessageHistory(String(campaignId), String(leadId));
+    if (opts?.force) {
+      // Bust both L1 (memory) and L2 (Mongo) caches for this thread's history
+      // so the upcoming fetch hits Smartlead live and sees the new reply.
+      await invalidateSmartleadCache(`/campaigns/${campaignId}/leads/${leadId}/message-history`).catch(() => {});
+    }
+    const history = await fetchLeadMessageHistory(String(campaignId), String(leadId), { force: !!opts?.force });
     if (history.length === 0) {
       await connectDB();
       await InboxThread.updateOne(

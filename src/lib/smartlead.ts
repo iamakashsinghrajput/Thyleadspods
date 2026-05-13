@@ -408,15 +408,23 @@ export interface SmartleadMessageHistoryItem {
   click_count?: number;
 }
 
-export async function fetchLeadMessageHistory(campaignId: string, leadId: string): Promise<SmartleadMessageHistoryItem[]> {
+export async function fetchLeadMessageHistory(campaignId: string, leadId: string, opts?: { force?: boolean }): Promise<SmartleadMessageHistoryItem[]> {
   const data = await smartleadFetch<SmartleadMessageHistoryItem[] | { history?: SmartleadMessageHistoryItem[] }>(
     `/campaigns/${encodeURIComponent(campaignId)}/leads/${encodeURIComponent(leadId)}/message-history`,
+    opts,
   );
   if (Array.isArray(data)) return data;
   if (data && Array.isArray((data as { history: SmartleadMessageHistoryItem[] }).history)) {
     return (data as { history: SmartleadMessageHistoryItem[] }).history;
   }
   return [];
+}
+
+export async function invalidateSmartleadCache(pathPrefix?: string): Promise<number> {
+  await connectDB();
+  const filter = pathPrefix ? { path: { $regex: `^${pathPrefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` } } : {};
+  const r = await SmartleadCache.deleteMany(filter);
+  return r.deletedCount || 0;
 }
 
 export interface SmartleadLeadCategory {
