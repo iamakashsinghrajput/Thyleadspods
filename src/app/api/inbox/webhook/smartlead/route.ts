@@ -137,6 +137,7 @@ function extractIds(e: WebhookEvent): { campaignId: number | null; leadId: numbe
   );
   const leadId = findIdByKey(e, (k) =>
     k === "lead_id" || k === "leadid" || k === "sl_lead_id" || k === "sl_leadid" || k === "lead"
+    || k === "sl_email_lead_id" || k === "sl_email_leadid"
   );
   return { campaignId, leadId };
 }
