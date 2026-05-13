@@ -241,11 +241,14 @@ async function mapLimitedLocal<T, R>(items: T[], limit: number, fn: (item: T) =>
   return results;
 }
 
+const CAMPAIGN_PARALLELISM = 4;
+
 export async function syncMasterInbox(): Promise<{ campaigns: number; threads: number; skipped?: boolean; cancelled?: boolean; error?: string }> {
   const acquired = await tryAcquireSyncLock();
   if (!acquired) return { campaigns: 0, threads: 0, skipped: true };
 
   let totalThreads = 0;
+  let processedCampaigns = 0;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   try {
@@ -261,25 +264,28 @@ export async function syncMasterInbox(): Promise<{ campaigns: number; threads: n
     }
 
     const active = campaigns.filter((c) => c.id !== undefined && (c.status || "").toLowerCase() !== "drafted");
-
     await heartbeat({ stage: "scanning", campaignsTotal: active.length, campaignsProcessed: 0 });
 
-    for (let ci = 0; ci < active.length; ci++) {
-      if (await isCancelled()) {
-        return { campaigns: ci, threads: totalThreads, cancelled: true };
-      }
-      const campaign = active[ci];
+    // Pre-load every threadKey we already have. Skipping these in the engaged
+    // loop eliminates the bulk of message-history calls (which is what
+    // dominates the sync time).
+    await connectDB();
+    const existingDocs = await InboxThread.find({}).select("threadKey").lean<{ threadKey: string }[]>();
+    const existingKeys = new Set(existingDocs.map((d) => d.threadKey));
+    console.log(`[inbox-sync] existing threads in DB: ${existingKeys.size}`);
+
+    async function processCampaign(campaign: { id?: number | string; name?: string; status?: string }) {
+      if (campaign.id === undefined) return;
+      if (await isCancelled()) return;
       const campaignId = Number(campaign.id);
       const campaignName = campaign.name || `Campaign ${campaignId}`;
       const campaignStatus = campaign.status || "";
 
-      await heartbeat({ currentCampaign: campaignName, campaignsProcessed: ci });
-
-      // Page through leads, collect engaged ones.
-      const engaged: SmartleadLeadRow[] = [];
+      // Page through leads, collect engaged + new.
+      const engagedNew: SmartleadLeadRow[] = [];
       let totalLeadsThisCampaign = 0;
       for (let page = 0; page < MAX_LEAD_PAGES_PER_CAMPAIGN; page++) {
-        if (await isCancelled()) return { campaigns: ci, threads: totalThreads, cancelled: true };
+        if (await isCancelled()) return;
         let resp;
         try {
           resp = await fetchCampaignLeads(String(campaignId), { limit: LEADS_PAGE_SIZE, offset: page * LEADS_PAGE_SIZE });
@@ -288,31 +294,23 @@ export async function syncMasterInbox(): Promise<{ campaigns: number; threads: n
           break;
         }
         const rows = resp.data || [];
-        if (page === 0 && rows.length > 0) {
-          // One-time per-campaign diagnostic so we can see what Smartlead actually returns.
-          try {
-            const sample = rows[0];
-            console.log(`[inbox-sync] campaign ${campaignId} "${campaignName}" sample lead keys:`, Object.keys(asAny(sample.campaign_lead_map)), "lead status:", asAny(sample.campaign_lead_map).status, "is_replied:", asAny(sample.campaign_lead_map).is_replied, "category:", asAny(sample.campaign_lead_map).lead_category_id);
-          } catch {}
-        }
         if (rows.length === 0) break;
         totalLeadsThisCampaign += rows.length;
         for (const row of rows) {
-          if (isEngaged(row)) engaged.push(row);
+          if (!isEngaged(row)) continue;
+          const leadId = Number(row.lead?.id);
+          if (!Number.isFinite(leadId)) continue;
+          if (existingKeys.has(makeThreadKey(leadId, campaignId))) continue; // already have it
+          engagedNew.push(row);
         }
-        await heartbeat({ leadsScanned: (page + 1) * LEADS_PAGE_SIZE });
         if (rows.length < LEADS_PAGE_SIZE) break;
       }
 
-      console.log(`[inbox-sync] campaign ${campaignId} "${campaignName}": ${totalLeadsThisCampaign} leads, ${engaged.length} engaged`);
+      console.log(`[inbox-sync] campaign ${campaignId} "${campaignName}": ${totalLeadsThisCampaign} leads, ${engagedNew.length} new engaged`);
 
-      if (engaged.length === 0) {
-        await heartbeat({ campaignsProcessed: ci + 1 });
-        continue;
-      }
+      if (engagedNew.length === 0) return;
 
-      // Fetch message history (cached) + persist threads, bounded concurrency.
-      await mapLimitedLocal(engaged, PER_CAMPAIGN_HISTORY_CONCURRENCY, async (row) => {
+      await mapLimitedLocal(engagedNew, PER_CAMPAIGN_HISTORY_CONCURRENCY, async (row) => {
         if (await isCancelled()) return;
         const lead = row.lead;
         if (!lead?.id) return;
@@ -334,15 +332,33 @@ export async function syncMasterInbox(): Promise<{ campaigns: number; threads: n
           });
           if (persisted) {
             totalThreads++;
+            existingKeys.add(makeThreadKey(leadId, campaignId));
             await heartbeat({ threadsPersisted: totalThreads });
           }
         } catch {
           // Skip this lead; sync continues.
         }
       });
-
-      await heartbeat({ campaignsProcessed: ci + 1 });
     }
+
+    // Process campaigns in parallel — bounded by CAMPAIGN_PARALLELISM. Each
+    // worker also respects the global rate budget + 6-concurrency request cap.
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(CAMPAIGN_PARALLELISM, active.length) }, async () => {
+      while (cursor < active.length) {
+        const idx = cursor++;
+        const campaign = active[idx];
+        try {
+          await heartbeat({ currentCampaign: campaign.name || `Campaign ${campaign.id}` });
+          await processCampaign(campaign);
+        } catch (e) {
+          console.warn(`[inbox-sync] campaign worker error:`, e);
+        }
+        processedCampaigns++;
+        await heartbeat({ campaignsProcessed: processedCampaigns });
+      }
+    });
+    await Promise.all(workers);
 
     await connectDB();
     await InboxSyncState.updateOne(
