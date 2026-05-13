@@ -12,7 +12,6 @@ const PodSchema = new Schema({
   order: { type: Number, default: 0 },
 }, { strict: false, timestamps: true });
 
-PodSchema.index({ id: 1 }, { unique: true });
 PodSchema.index({ order: 1 });
 
 if (mongoose.models[modelName]) delete mongoose.models[modelName];

@@ -60,6 +60,7 @@ const TTL_BY_PATH: Array<{ test: RegExp; ttl: number }> = [
   { test: /\/campaigns\/[^/]+$/, ttl: 5 * 60_000 },
   { test: /\/campaigns$/, ttl: 2 * 60_000 },
   { test: /\/leads\/fetch-categories$/, ttl: 60 * 60_000 },
+  { test: /\/leads\/[^/]+$/, ttl: 10 * 60_000 },
 ];
 
 function ttlFor(path: string): number {
@@ -443,6 +444,27 @@ export async function updateLeadCategory(campaignId: string, leadId: string, cat
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new Error(`Smartlead ${res.status}: ${body.slice(0, 240) || res.statusText}`);
+  }
+}
+
+export interface SmartleadLead {
+  id?: number;
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  company_name?: string;
+  job_title?: string;
+  phone_number?: string;
+  website?: string;
+  location?: string;
+  linkedin_profile?: string;
+}
+
+export async function fetchLead(leadId: string): Promise<SmartleadLead | null> {
+  try {
+    return await smartleadFetch<SmartleadLead>(`/leads/${encodeURIComponent(leadId)}`);
+  } catch {
+    return null;
   }
 }
 

@@ -4,7 +4,9 @@ import InboxMessage from "@/lib/models/inbox-message";
 import InboxSyncState from "@/lib/models/inbox-sync-state";
 import {
   fetchAllCampaigns,
+  fetchCampaign,
   fetchCampaignLeads,
+  fetchLead,
   fetchLeadMessageHistory,
   fetchLeadCategories,
   type SmartleadMessageHistoryItem,
@@ -422,9 +424,9 @@ export async function syncThreadMessages(leadId: number, campaignId: number): Pr
     const last = replyMessages[replyMessages.length - 1] || history[history.length - 1];
 
     // If this thread doesn't exist yet (webhook fired for a brand-new lead),
-    // populate the lead info from the reply message so it shows up in the UI.
+    // fetch real campaign + lead info from Smartlead so it appears in the UI
+    // with proper names instead of placeholders.
     const existing = await InboxThread.findOne({ threadKey }).lean<{ leadEmail?: string }>();
-    const leadFromAddr = parseFromAddress(replyMessages[0]?.from || last?.from);
     const setFields: Record<string, unknown> = {
       threadKey,
       leadId,
@@ -437,10 +439,19 @@ export async function syncThreadMessages(leadId: number, campaignId: number): Pr
       syncedAt: new Date(),
     };
     if (!existing) {
-      setFields.leadEmail = leadFromAddr.email;
-      setFields.leadFirstName = leadFromAddr.first;
-      setFields.leadLastName = leadFromAddr.last;
-      setFields.campaignName = setFields.campaignName || `Campaign ${campaignId}`;
+      const leadFromAddr = parseFromAddress(replyMessages[0]?.from || last?.from);
+      const [campaignMeta, leadMeta] = await Promise.all([
+        fetchCampaign(String(campaignId)).catch(() => null),
+        fetchLead(String(leadId)).catch(() => null),
+      ]);
+      setFields.campaignName = campaignMeta?.name || `Campaign ${campaignId}`;
+      setFields.campaignStatus = campaignMeta?.status || "";
+      setFields.leadEmail = leadMeta?.email || leadFromAddr.email;
+      setFields.leadFirstName = leadMeta?.first_name || leadFromAddr.first;
+      setFields.leadLastName = leadMeta?.last_name || leadFromAddr.last;
+      setFields.leadCompany = leadMeta?.company_name || "";
+      setFields.leadTitle = leadMeta?.job_title || "";
+      setFields.leadPhone = leadMeta?.phone_number || "";
     }
     await InboxThread.updateOne({ threadKey }, { $set: setFields }, { upsert: true });
 

@@ -79,6 +79,21 @@ function relativeTime(iso?: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
+function fmtThreadTime(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  const sameYear = d.getFullYear() === now.getFullYear();
+  if (sameDay) {
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
+  if (sameYear) {
+    return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
 function initials(first: string, last: string, email: string): string {
   const a = (first || "").trim().charAt(0).toUpperCase();
   const b = (last || "").trim().charAt(0).toUpperCase();
@@ -541,7 +556,7 @@ export default function MasterInboxPage() {
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
                             <p className={`text-[13px] truncate ${unread ? "font-bold text-slate-900" : "font-medium text-slate-700"}`}>{name}</p>
-                            <span className="text-[10px] text-slate-400 shrink-0 ml-auto tabular-nums whitespace-nowrap">{relativeTime(t.lastReplyAt)}</span>
+                            <span className="text-[10px] text-slate-400 shrink-0 ml-auto tabular-nums whitespace-nowrap" title={new Date(t.lastReplyAt).toLocaleString()}>{fmtThreadTime(t.lastReplyAt)}</span>
                           </div>
                           {t.leadCompany && (
                             <p className="text-[11px] text-slate-500 truncate mt-0.5">{t.leadCompany}{t.leadTitle ? <span className="text-slate-400"> · {t.leadTitle}</span> : null}</p>
@@ -696,7 +711,7 @@ function ThreadView({
             </p>
           </div>
           <div className="shrink-0 flex flex-col items-end gap-1.5">
-            <p className="text-[11px] text-slate-400 tabular-nums">{relativeTime(thread.lastReplyAt)}</p>
+            <p className="text-[11px] text-slate-400 tabular-nums" title={new Date(thread.lastReplyAt).toLocaleString()}>{fmtThreadTime(thread.lastReplyAt)}</p>
             <div className="relative">
               <button
                 onClick={() => setPickerOpen((v) => !v)}

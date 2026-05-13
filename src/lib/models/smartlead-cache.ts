@@ -9,7 +9,6 @@ const SmartleadCacheSchema = new Schema({
   refreshingAt: { type: Date, default: null },
 }, { strict: false, timestamps: true });
 
-SmartleadCacheSchema.index({ path: 1 }, { unique: true });
 // Auto-evict cache entries after 24h to keep storage bounded.
 SmartleadCacheSchema.index({ fetchedAt: 1 }, { expireAfterSeconds: 24 * 60 * 60 });
 
