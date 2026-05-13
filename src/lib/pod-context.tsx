@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { useCrossTabSync } from "./use-sync";
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { useAuth } from "./auth-context";
 
 export interface PodInfo {
   id: string;
@@ -15,80 +15,96 @@ export interface PodInfo {
 interface PodContextType {
   pods: PodInfo[];
   podMap: Record<string, PodInfo>;
-  addPod: (name: string, members: string[]) => void;
-  deletePod: (id: string) => void;
-  updatePodMembers: (id: string, members: string[]) => void;
+  loaded: boolean;
+  addPod: (name: string, members: string[]) => Promise<void>;
+  deletePod: (id: string) => Promise<void>;
+  updatePodMembers: (id: string, members: string[]) => Promise<void>;
+  refresh: () => Promise<void>;
 }
-
-const podColors = [
-  { color: "bg-emerald-500", text: "text-emerald-700", bgLight: "bg-emerald-50" },
-  { color: "bg-purple-500", text: "text-purple-700", bgLight: "bg-purple-50" },
-  { color: "bg-orange-500", text: "text-orange-700", bgLight: "bg-orange-50" },
-  { color: "bg-sky-500", text: "text-sky-700", bgLight: "bg-sky-50" },
-  { color: "bg-rose-500", text: "text-rose-700", bgLight: "bg-rose-50" },
-  { color: "bg-teal-500", text: "text-teal-700", bgLight: "bg-teal-50" },
-  { color: "bg-amber-500", text: "text-amber-700", bgLight: "bg-amber-50" },
-  { color: "bg-indigo-500", text: "text-indigo-700", bgLight: "bg-indigo-50" },
-  { color: "bg-cyan-500", text: "text-cyan-700", bgLight: "bg-cyan-50" },
-  { color: "bg-pink-500", text: "text-pink-700", bgLight: "bg-pink-50" },
-];
-
-const defaultPods: PodInfo[] = [
-  { id: "pod1", name: "Pod 1", members: ["Kunal", "Shruti"], ...podColors[0] },
-  { id: "pod2", name: "Pod 2", members: ["Manshi", "Naman"], ...podColors[1] },
-  { id: "pod3", name: "Pod 3", members: ["Krishna", "Mridul"], ...podColors[2] },
-  { id: "pod4", name: "Pod 4", members: ["Sandeep", "Pranesh"], ...podColors[3] },
-];
 
 const PodContext = createContext<PodContextType | null>(null);
 
 export function PodProvider({ children }: { children: React.ReactNode }) {
-  const [pods, setPods] = useState<PodInfo[]>(defaultPods);
+  const { user, hydrated } = useAuth();
+  const [pods, setPods] = useState<PodInfo[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const inFlightRef = useRef(false);
 
-  useEffect(() => {
-    const PODS_VERSION = "v4";
+  const refresh = useCallback(async () => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     try {
-      if (localStorage.getItem("thyleads_pods_version") !== PODS_VERSION) {
-        localStorage.removeItem("thyleads_pods");
-        localStorage.setItem("thyleads_pods_version", PODS_VERSION);
-      } else {
-        const raw = localStorage.getItem("thyleads_pods");
-        if (raw) setPods(JSON.parse(raw));
+      const res = await fetch("/api/pods", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.pods)) {
+        setPods((prev) => {
+          const next = data.pods as PodInfo[];
+          if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
+          return next;
+        });
+        setLoaded(true);
       }
-    } catch {}
-    setLoaded(true);
+    } catch {} finally {
+      inFlightRef.current = false;
+    }
   }, []);
 
-  useEffect(() => { if (loaded) localStorage.setItem("thyleads_pods", JSON.stringify(pods)); }, [pods, loaded]);
+  useEffect(() => {
+    if (!hydrated) return;
+    void refresh();
+  }, [hydrated, refresh]);
 
-  const setPodsCb = useCallback((v: PodInfo[]) => setPods(v), []);
-  useCrossTabSync("thyleads_pods", setPodsCb);
+  useEffect(() => {
+    if (!hydrated) return;
+    const t = setInterval(() => { void refresh(); }, 20_000);
+    const onVisible = () => { if (document.visibilityState === "visible") void refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [hydrated, refresh]);
 
   const podMap = Object.fromEntries(pods.map((p) => [p.id, p])) as Record<string, PodInfo>;
 
-  function addPod(name: string, members: string[]) {
-    const nextNum = pods.length + 1;
-    const colorSet = podColors[(pods.length) % podColors.length];
-    const newPod: PodInfo = {
-      id: `pod${nextNum}`,
-      name,
-      members,
-      ...colorSet,
-    };
-    setPods((prev) => [...prev, newPod]);
+  async function addPod(name: string, members: string[]) {
+    if (!user?.email) return;
+    const res = await fetch("/api/pods", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor: user.email, name, members }),
+    });
+    if (res.ok) {
+      const { pod } = await res.json();
+      if (pod) setPods((prev) => [...prev, pod]);
+    }
   }
 
-  function deletePod(id: string) {
+  async function deletePod(id: string) {
+    if (!user?.email) return;
     setPods((prev) => prev.filter((p) => p.id !== id));
+    await fetch(`/api/pods?actor=${encodeURIComponent(user.email)}&id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    void refresh();
   }
 
-  function updatePodMembers(id: string, members: string[]) {
+  async function updatePodMembers(id: string, members: string[]) {
+    if (!user?.email) return;
     setPods((prev) => prev.map((p) => p.id === id ? { ...p, members } : p));
+    const res = await fetch("/api/pods", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actor: user.email, id, members }),
+    });
+    if (!res.ok) void refresh();
   }
 
   return (
-    <PodContext.Provider value={{ pods, podMap, addPod, deletePod, updatePodMembers }}>
+    <PodContext.Provider value={{ pods, podMap, loaded, addPod, deletePod, updatePodMembers, refresh }}>
       {children}
     </PodContext.Provider>
   );
