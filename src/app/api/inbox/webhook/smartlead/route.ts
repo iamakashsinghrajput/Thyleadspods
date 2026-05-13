@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
     { upsert: true },
   );
 
-  const targetList = Array.from(targets);
+  const targetList = Array.from(targets.keys());
   const detailed = results.map((r, i) => ({ key: targetList[i], messages: r.messages, error: r.error }));
   console.log("[smartlead-webhook] processed:", targets.size, "results:", JSON.stringify(detailed).slice(0, 500));
 
