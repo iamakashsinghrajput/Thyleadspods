@@ -53,7 +53,7 @@ interface PilotDoc {
   updatedAt: Date;
 }
 
-// Social proof library + resolveProofPool live in agents/phase8-research.ts (where they're consumed).
+
 
 function toEnrichedAccount(doc: Record<string, unknown>): EnrichedAccount {
   const num = (v: unknown) => typeof v === "number" ? v : Number(v) || 0;
