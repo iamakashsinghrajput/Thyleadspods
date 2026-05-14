@@ -18,19 +18,35 @@ function authorized(req: NextRequest): boolean {
 type WebhookEvent = {
   event_type?: string;
   campaign_id?: number | string;
+  campaign_name?: string;
+  campaign_status?: string;
   lead_id?: number | string;
   campaignId?: number | string;
   leadId?: number | string;
   data?: Record<string, unknown>;
-  // Inline reply fields seen on EMAIL_REPLY events:
-  reply_message?: { message_id?: string; subject?: string; html?: string; text?: string; time?: string };
+  // Inline reply fields seen on EMAIL_REPLY events. Smartlead's payload uses
+  // multiple shapes across versions — `reply_message` is sometimes a string
+  // (the HTML body), sometimes an object with html/text, sometimes a stats id.
+  reply_message?: string | { message_id?: string; subject?: string; html?: string; text?: string; time?: string };
+  reply_body?: string;
   email_body?: string;
   email_subject?: string;
+  subject?: string;
   reply_time?: string;
   time_replied?: string;
+  event_timestamp?: string;
   from?: string;
+  from_email?: string;
   lead_email?: string;
+  sl_lead_email?: string;
+  message_id?: string;
 };
+
+function isReplyEvent(e: WebhookEvent): boolean {
+  const t = String(e.event_type || "").toUpperCase();
+  if (!t) return true; // no event_type — accept (legacy / Smartlead version drift)
+  return t.includes("REPLY");
+}
 
 function parseDate(s: string | null | undefined): Date | null {
   if (!s) return null;
@@ -45,11 +61,43 @@ function previewText(html: string, max = 240): string {
 async function persistInlineReply({ leadId, campaignId, event }: { leadId: number; campaignId: number; event?: WebhookEvent }): Promise<boolean> {
   if (!event) return false;
   const data = (event.data || {}) as Record<string, unknown>;
-  const rm = event.reply_message || (data.reply_message as WebhookEvent["reply_message"]) || null;
-  const body = (rm?.html as string | undefined) || (rm?.text as string | undefined) || event.email_body || (data.email_body as string | undefined) || "";
-  const subject = rm?.subject || event.email_subject || (data.email_subject as string | undefined) || "";
-  const timeIso = rm?.time || event.reply_time || (data.reply_time as string | undefined) || event.time_replied || (data.time_replied as string | undefined) || null;
-  const from = event.from || event.lead_email || (data.from as string | undefined) || (data.lead_email as string | undefined) || "";
+  const rmRaw = event.reply_message ?? (data.reply_message as WebhookEvent["reply_message"]) ?? null;
+  const rm: { message_id?: string; subject?: string; html?: string; text?: string; time?: string } | null =
+    typeof rmRaw === "string" ? { html: rmRaw } : (rmRaw as { message_id?: string; subject?: string; html?: string; text?: string; time?: string } | null);
+  const body =
+    rm?.html
+    || rm?.text
+    || event.reply_body
+    || (data.reply_body as string | undefined)
+    || event.email_body
+    || (data.email_body as string | undefined)
+    || "";
+  const subject =
+    rm?.subject
+    || event.subject
+    || (data.subject as string | undefined)
+    || event.email_subject
+    || (data.email_subject as string | undefined)
+    || "";
+  const timeIso =
+    rm?.time
+    || event.time_replied
+    || (data.time_replied as string | undefined)
+    || event.reply_time
+    || (data.reply_time as string | undefined)
+    || event.event_timestamp
+    || (data.event_timestamp as string | undefined)
+    || null;
+  const from =
+    event.from_email
+    || event.sl_lead_email
+    || event.lead_email
+    || event.from
+    || (data.from_email as string | undefined)
+    || (data.sl_lead_email as string | undefined)
+    || (data.lead_email as string | undefined)
+    || (data.from as string | undefined)
+    || "";
 
   // Skip if there's no usable inline content. We still rely on syncThreadMessages
   // (called by caller) to pull the message-history in that case.
@@ -57,7 +105,13 @@ async function persistInlineReply({ leadId, campaignId, event }: { leadId: numbe
 
   const threadKey = `${leadId}:${campaignId}`;
   const time = parseDate(timeIso) || new Date();
-  const messageId = rm?.message_id || (data.message_id as string | undefined) || `webhook-${leadId}-${campaignId}-${time.getTime()}`;
+  const messageId =
+    rm?.message_id
+    || event.message_id
+    || (data.message_id as string | undefined)
+    || `webhook-${leadId}-${campaignId}-${time.getTime()}`;
+  const campaignName = event.campaign_name || (data.campaign_name as string | undefined) || "";
+  const campaignStatus = event.campaign_status || (data.campaign_status as string | undefined) || "";
 
   await InboxMessage.updateOne(
     { messageId },
@@ -81,20 +135,25 @@ async function persistInlineReply({ leadId, campaignId, event }: { leadId: numbe
 
   // Upsert thread so it shows in the inbox even if syncThreadMessages can't
   // reach Smartlead. Names get filled in later by syncThreadMessages via
-  // fetchLead / fetchCampaign.
+  // fetchLead / fetchCampaign — but populate campaign info from the webhook
+  // payload now if it's there, so the campaign chip isn't blank.
+  const setFields: Record<string, unknown> = {
+    threadKey,
+    leadId,
+    campaignId,
+    lastReplyAt: time,
+    lastReplyPreview: previewText(body),
+    lastReplySubject: subject,
+    leadEmail: from,
+    syncedAt: new Date(),
+  };
+  if (campaignName) setFields.campaignName = campaignName;
+  if (campaignStatus) setFields.campaignStatus = campaignStatus;
+
   await InboxThread.updateOne(
     { threadKey },
     {
-      $set: {
-        threadKey,
-        leadId,
-        campaignId,
-        lastReplyAt: time,
-        lastReplyPreview: previewText(body),
-        lastReplySubject: subject,
-        leadEmail: from,
-        syncedAt: new Date(),
-      },
+      $set: setFields,
       $inc: { replyCount: 1 },
     },
     { upsert: true },
@@ -168,13 +227,24 @@ export async function POST(req: NextRequest) {
 
   if (events.length === 0) return NextResponse.json({ ok: true, processed: 0 });
 
+  // Only process reply events. Sent / open / click events would create
+  // outbound-only threads with no reply, which is exactly what the user
+  // doesn't want shown in the master inbox.
+  const replyEvents = events.filter(isReplyEvent);
+  const skippedNonReply = events.length - replyEvents.length;
+  if (skippedNonReply > 0) {
+    console.log(`[smartlead-webhook] skipped ${skippedNonReply} non-reply event(s):`,
+      events.filter((e) => !isReplyEvent(e)).map((e) => e.event_type).join(", "));
+  }
+  if (replyEvents.length === 0) return NextResponse.json({ ok: true, processed: 0, skippedNonReply });
+
   await connectDB();
 
   // Build a map of (leadId, campaignId) -> inline payload data we can persist
   // directly. EMAIL_REPLY events usually carry the new message in the payload
   // itself, which avoids any indexing-lag race on Smartlead's side.
   const targets = new Map<string, { campaignId: number; leadId: number; inline?: WebhookEvent }>();
-  for (const e of events) {
+  for (const e of replyEvents) {
     const { campaignId, leadId } = extractIds(e);
     if (campaignId == null || leadId == null) continue;
     const key = `${leadId}:${campaignId}`;

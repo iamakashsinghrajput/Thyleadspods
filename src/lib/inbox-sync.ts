@@ -445,10 +445,16 @@ export async function syncThreadMessages(leadId: number, campaignId: number, opt
     const replyMessages = history.filter((m) => isReplyType(m.type));
     const last = replyMessages[replyMessages.length - 1] || history[history.length - 1];
 
-    // If this thread doesn't exist yet (webhook fired for a brand-new lead),
-    // fetch real campaign + lead info from Smartlead so it appears in the UI
-    // with proper names instead of placeholders.
-    const existing = await InboxThread.findOne({ threadKey }).lean<{ leadEmail?: string }>();
+    // Enrich whenever the thread is missing lead/campaign info — not only on
+    // first creation. The webhook handler upserts the thread with just the
+    // body + email, so by the time we get here the doc usually exists but
+    // has no leadFirstName / campaignName, which would render as "Unknown".
+    const existing = await InboxThread.findOne({ threadKey }).lean<{
+      leadEmail?: string;
+      leadFirstName?: string;
+      leadLastName?: string;
+      campaignName?: string;
+    }>();
     const setFields: Record<string, unknown> = {
       threadKey,
       leadId,
@@ -460,20 +466,28 @@ export async function syncThreadMessages(leadId: number, campaignId: number, opt
       lastReplyAt: parseDate(last?.time) || new Date(),
       syncedAt: new Date(),
     };
-    if (!existing) {
+
+    const needsLeadInfo = !existing || (!existing.leadFirstName && !existing.leadLastName);
+    const needsCampaignInfo = !existing || !existing.campaignName;
+
+    if (needsLeadInfo || needsCampaignInfo) {
       const leadFromAddr = parseFromAddress(replyMessages[0]?.from || last?.from);
       const [campaignMeta, leadMeta] = await Promise.all([
-        fetchCampaign(String(campaignId)).catch(() => null),
-        fetchLead(String(leadId)).catch(() => null),
+        needsCampaignInfo ? fetchCampaign(String(campaignId)).catch(() => null) : Promise.resolve(null),
+        needsLeadInfo ? fetchLead(String(leadId)).catch(() => null) : Promise.resolve(null),
       ]);
-      setFields.campaignName = campaignMeta?.name || `Campaign ${campaignId}`;
-      setFields.campaignStatus = campaignMeta?.status || "";
-      setFields.leadEmail = leadMeta?.email || leadFromAddr.email;
-      setFields.leadFirstName = leadMeta?.first_name || leadFromAddr.first;
-      setFields.leadLastName = leadMeta?.last_name || leadFromAddr.last;
-      setFields.leadCompany = leadMeta?.company_name || "";
-      setFields.leadTitle = leadMeta?.job_title || "";
-      setFields.leadPhone = leadMeta?.phone_number || "";
+      if (needsCampaignInfo) {
+        setFields.campaignName = campaignMeta?.name || `Campaign ${campaignId}`;
+        setFields.campaignStatus = campaignMeta?.status || "";
+      }
+      if (needsLeadInfo) {
+        setFields.leadEmail = leadMeta?.email || leadFromAddr.email || existing?.leadEmail || "";
+        setFields.leadFirstName = leadMeta?.first_name || leadFromAddr.first || "";
+        setFields.leadLastName = leadMeta?.last_name || leadFromAddr.last || "";
+        setFields.leadCompany = leadMeta?.company_name || "";
+        setFields.leadTitle = leadMeta?.job_title || "";
+        setFields.leadPhone = leadMeta?.phone_number || "";
+      }
     }
     await InboxThread.updateOne({ threadKey }, { $set: setFields }, { upsert: true });
 
