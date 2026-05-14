@@ -71,30 +71,44 @@ function isCategoryEvent(e: WebhookEvent): boolean {
   return cands.some((v) => v != null);
 }
 
-function extractCategoryInfo(e: WebhookEvent): { categoryId: number | null; categoryName: string } {
+// Keys we recognize as category fields in the webhook payload.
+const CATEGORY_ID_KEYS = ["lead_category_id", "new_category_id", "category_id"];
+const CATEGORY_NAME_KEYS = ["new_category_name", "lead_category_name", "category_name", "category", "lead_category", "reply_category"];
+
+function extractCategoryInfo(e: WebhookEvent): {
+  categoryId: number | null;
+  categoryName: string;
+  // True if the payload contains any category field (even null). Distinguishes
+  // "payload tells us category was removed" from "payload has no category info
+  // at all". Lets us treat null/0 as an intentional clear instead of a no-op.
+  payloadHasCategoryField: boolean;
+} {
   const data = (e.data || {}) as Record<string, unknown>;
-  const idCandidates: unknown[] = [
-    e.new_category_id, e.lead_category_id, e.category_id,
-    data.new_category_id, data.lead_category_id, data.category_id,
-  ];
+  const o = e as unknown as Record<string, unknown>;
+
+  const presentInTopLevel = (k: string) => Object.prototype.hasOwnProperty.call(o, k);
+  const presentInData = (k: string) => Object.prototype.hasOwnProperty.call(data, k);
+  const payloadHasCategoryField =
+    CATEGORY_ID_KEYS.some(presentInTopLevel)
+    || CATEGORY_ID_KEYS.some(presentInData)
+    || CATEGORY_NAME_KEYS.some(presentInTopLevel)
+    || CATEGORY_NAME_KEYS.some(presentInData);
+
   let categoryId: number | null = null;
-  for (const v of idCandidates) {
+  for (const k of CATEGORY_ID_KEYS) {
+    const v = o[k] ?? data[k];
     if (v == null) continue;
     const n = Number(v);
     if (Number.isFinite(n) && n > 0) { categoryId = n; break; }
   }
-  const o = e as unknown as Record<string, unknown>;
-  const nameCandidates: unknown[] = [
-    e.new_category_name, e.lead_category_name, e.category_name, e.category,
-    o.lead_category, o.reply_category,
-    data.new_category_name, data.lead_category_name, data.category_name, data.category,
-    data.lead_category, data.reply_category,
-  ];
+
   let categoryName = "";
-  for (const v of nameCandidates) {
+  for (const k of CATEGORY_NAME_KEYS) {
+    const v = o[k] ?? data[k];
     if (typeof v === "string" && v.trim()) { categoryName = v.trim(); break; }
   }
-  return { categoryId, categoryName };
+
+  return { categoryId, categoryName, payloadHasCategoryField };
 }
 
 function parseDate(s: string | null | undefined): Date | null {
@@ -296,26 +310,32 @@ export async function POST(req: NextRequest) {
       const { campaignId, leadId } = extractIds(e);
       if (campaignId == null || leadId == null) continue;
       const threadKey = `${leadId}:${campaignId}`;
-      let { categoryId, categoryName } = extractCategoryInfo(e);
-      if (!categoryName && categoryId != null) {
+      const { categoryId, categoryName, payloadHasCategoryField } = extractCategoryInfo(e);
+
+      let finalCategory = "";
+      if (categoryName) {
+        finalCategory = categoryName;
+      } else if (categoryId != null) {
         if (!categoryNameById) {
           const cats = await fetchLeadCategories().catch(() => []);
           categoryNameById = new Map();
           for (const c of cats) if (c.id !== undefined && c.name) categoryNameById.set(Number(c.id), c.name);
         }
-        categoryName = categoryNameById.get(categoryId) || "";
-      }
-      // If we still couldn't resolve, fall back to the live refresh helper —
-      // it'll fetch the lead row and look it up.
-      if (!categoryName && categoryId == null) {
+        finalCategory = categoryNameById.get(categoryId) || "";
+      } else if (!payloadHasCategoryField) {
+        // No category info anywhere — fall back to live refresh from Smartlead.
         await refreshThreadCategory(leadId, campaignId, { force: true }).catch(() => {});
         categoryUpdates++;
         continue;
       }
+      // Otherwise: payload has the field but the value is null/empty — that's
+      // an intentional removal. finalCategory stays "" and we clear the DB.
+
       const res = await InboxThread.updateOne(
         { threadKey },
-        { $set: { category: categoryName, categorySyncedAt: new Date() } },
+        { $set: { category: finalCategory, categorySyncedAt: new Date() } },
       );
+      console.log(`[smartlead-webhook] category for ${threadKey} -> "${finalCategory}" (matched=${res.matchedCount})`);
       if (res.matchedCount > 0) categoryUpdates++;
     }
     console.log(`[smartlead-webhook] category updates applied: ${categoryUpdates}/${categoryEvents.length}`);

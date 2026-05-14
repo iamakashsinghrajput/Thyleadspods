@@ -17,9 +17,10 @@ import {
   Clock,
   FileSignature,
   Send,
-  Rocket,
   Shield,
   Inbox,
+  Megaphone,
+  Building2,
 } from "lucide-react";
 import { usePods } from "@/lib/pod-context";
 import { useData } from "@/lib/data-context";
@@ -114,8 +115,9 @@ export default function Sidebar() {
   const navItems = [
     { href: "/", icon: isAdmin ? LayoutDashboard : FolderKanban, label: isAdmin ? "Dashboard" : "My Projects", exact: true },
     ...(isAdmin ? [{ href: "/inbox", icon: Inbox, label: "Master Inbox", exact: false }] : []),
+    ...(isAdmin ? [{ href: "/campaigns", icon: Megaphone, label: "Master Campaigns", exact: false }] : []),
+    ...(isAdmin ? [{ href: "/accounts", icon: Building2, label: "Account Details", exact: false }] : []),
     ...(isAdmin ? [{ href: "/onboarding", icon: Send, label: "Onboarding", exact: false }] : []),
-    ...(isAdmin ? [{ href: "/outbound", icon: Rocket, label: "Outbound", exact: false }] : []),
     { href: "/attendance", icon: Clock, label: "Attendance", exact: false },
     { href: "/signatures", icon: FileSignature, label: "Signatures", exact: false },
     ...(isSuperadmin ? [{ href: "/members", icon: Shield, label: "Members", exact: false }] : []),

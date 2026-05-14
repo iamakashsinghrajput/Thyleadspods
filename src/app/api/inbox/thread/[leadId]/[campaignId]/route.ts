@@ -49,9 +49,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ lead
   }
 
   // Pull the latest category from Smartlead so changes made in the Smartlead
-  // master inbox flow back here. Wait for it (one cheap call) so the response
-  // reflects the current state.
-  await refreshThreadCategory(leadId, campaignId).catch(() => {});
+  // master inbox flow back here. Wait for it so the response reflects the
+  // current state. ?force=1 bypasses the 5s TTL — useful when the user clicks
+  // the refresh button after just changing a category in Smartlead.
+  const force = req.nextUrl.searchParams.get("force") === "1";
+  await refreshThreadCategory(leadId, campaignId, { force }).catch((e) => {
+    console.warn(`[thread-route] refreshThreadCategory failed for ${threadKey}:`, e instanceof Error ? e.message : e);
+  });
 
   const [updatedThread, messages] = await Promise.all([
     InboxThread.findOne({ threadKey }).lean(),

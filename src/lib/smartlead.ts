@@ -365,16 +365,70 @@ export async function fetchCampaignLeads(campaignId: string, opts: { limit?: num
 
 // Single-lead lookup that includes the campaign_lead_map (which holds the
 // current category id + status). Used by the inbox to pull the latest
-// category from Smartlead when the user opens a thread.
+// category from Smartlead when the user opens a thread. Tries multiple
+// strategies because Smartlead's per-lead endpoint isn't reliable across
+// all account tiers.
 export async function fetchLeadInCampaign(campaignId: string, leadId: string, opts?: { force?: boolean }): Promise<SmartleadLeadRow | null> {
+  const numericLeadId = Number(leadId);
+
+  // Strategy A: direct GET /campaigns/{id}/leads/{leadId}
   try {
     const path = `/campaigns/${encodeURIComponent(campaignId)}/leads/${encodeURIComponent(leadId)}`;
     const data = await smartleadFetch<SmartleadLeadRow | { data?: SmartleadLeadRow }>(path, opts);
-    if (data && typeof data === "object" && "data" in data && data.data) return data.data as SmartleadLeadRow;
-    return data as SmartleadLeadRow;
-  } catch {
-    return null;
+    const row = (data && typeof data === "object" && "data" in data && data.data
+      ? (data.data as SmartleadLeadRow)
+      : (data as SmartleadLeadRow));
+    if (row && (row.lead?.id || row.lead?.email || row.campaign_lead_map)) {
+      console.log(`[fetchLeadInCampaign] direct hit for lead=${leadId} campaign=${campaignId}, catId=${row.campaign_lead_map?.lead_category_id ?? row.lead_category_id ?? null}`);
+      return row;
+    }
+  } catch (e) {
+    console.log(`[fetchLeadInCampaign] direct endpoint failed for lead=${leadId} campaign=${campaignId}:`, e instanceof Error ? e.message : e);
   }
+
+  // Strategy B: fetch the lead's email, then ask the campaign-leads endpoint
+  // with an email filter (cheap if Smartlead supports it; falls through if not).
+  let email = "";
+  try {
+    const lead = await fetchLead(leadId);
+    email = lead?.email || "";
+  } catch {}
+
+  if (email) {
+    try {
+      const path = `/campaigns/${encodeURIComponent(campaignId)}/leads?email=${encodeURIComponent(email)}&limit=10`;
+      const resp = await smartleadFetch<SmartleadLeadsResponse>(path, opts);
+      const match = (resp?.data || []).find((r) => Number(r.lead?.id) === numericLeadId)
+        || (resp?.data || [])[0];
+      if (match) {
+        console.log(`[fetchLeadInCampaign] email-filter hit for lead=${leadId} via ${email}, catId=${match.campaign_lead_map?.lead_category_id ?? match.lead_category_id ?? null}`);
+        return match;
+      }
+    } catch (e) {
+      console.log(`[fetchLeadInCampaign] email-filter failed for lead=${leadId}:`, e instanceof Error ? e.message : e);
+    }
+  }
+
+  // Strategy C: paginate campaign leads and find by ID. Last resort — bounded
+  // to 20 pages (2000 leads) so it doesn't run away on huge campaigns.
+  try {
+    for (let page = 0; page < 20; page++) {
+      const resp = await fetchCampaignLeads(campaignId, { limit: 100, offset: page * 100 });
+      const rows = resp.data || [];
+      if (rows.length === 0) break;
+      const match = rows.find((r) => Number(r.lead?.id) === numericLeadId);
+      if (match) {
+        console.log(`[fetchLeadInCampaign] paginate hit for lead=${leadId} on page ${page}, catId=${match.campaign_lead_map?.lead_category_id ?? match.lead_category_id ?? null}`);
+        return match;
+      }
+      if (rows.length < 100) break;
+    }
+  } catch (e) {
+    console.log(`[fetchLeadInCampaign] paginate failed for lead=${leadId}:`, e instanceof Error ? e.message : e);
+  }
+
+  console.warn(`[fetchLeadInCampaign] no row found for lead=${leadId} campaign=${campaignId} after all strategies`);
+  return null;
 }
 
 export interface SmartleadCampaignStatRow {
@@ -529,6 +583,65 @@ function n(v: unknown): number {
     return Number.isFinite(parsed) ? parsed : 0;
   }
   return 0;
+}
+
+// Categories whose names suggest a positive outcome (interested, meeting,
+// qualified, etc). Matched against Smartlead's configured category names.
+const POSITIVE_CATEGORY_RE = /interest|meet|qualif|positiv|book/i;
+
+const replyMetricsCache = new Map<string, { fetchedAt: number; data: { uniqueReplyCount: number; positiveReplyCount: number } }>();
+const REPLY_METRICS_TTL_MS = 5 * 60_000;
+
+// Compute unique-reply and positive-reply counts for a campaign by paginating
+// its leads and bucketing by campaign_lead_map.status / lead_category_id.
+// Smartlead doesn't expose these aggregates directly, so we derive them.
+// Cached in-memory for 5 minutes so the portal isn't recomputing on every poll.
+export async function getCampaignReplyMetrics(campaignId: string, opts?: { force?: boolean }): Promise<{ uniqueReplyCount: number; positiveReplyCount: number }> {
+  const key = String(campaignId);
+  const cached = replyMetricsCache.get(key);
+  if (cached && !opts?.force && Date.now() - cached.fetchedAt < REPLY_METRICS_TTL_MS) {
+    return cached.data;
+  }
+
+  const categories = await fetchLeadCategories().catch(() => []);
+  const positiveCategoryIds = new Set<number>();
+  for (const c of categories) {
+    if (c.id != null && c.name && POSITIVE_CATEGORY_RE.test(c.name)) {
+      positiveCategoryIds.add(Number(c.id));
+    }
+  }
+
+  const REPLIED_STATUSES = new Set(["REPLIED", "INTERESTED", "NOT_INTERESTED", "MEETING_BOOKED", "MEETING_COMPLETED", "OUT_OF_OFFICE", "WRONG_PERSON", "DO_NOT_CONTACT"]);
+  const LIMIT = 100;
+  const MAX_PAGES = 100; // 10k leads cap
+
+  let unique = 0;
+  let positive = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    let resp;
+    try {
+      resp = await fetchCampaignLeads(key, { limit: LIMIT, offset: page * LIMIT });
+    } catch {
+      break;
+    }
+    const rows = resp.data || [];
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const map = (row.campaign_lead_map || {}) as Record<string, unknown>;
+      const r = row as Record<string, unknown>;
+      const status = String(map.status || r.status || "").toUpperCase();
+      const replyTimestamp = map.last_replied_at ?? r.last_replied_at;
+      const isReply = REPLIED_STATUSES.has(status) || replyTimestamp != null;
+      if (isReply) unique++;
+      const catId = map.lead_category_id ?? r.lead_category_id;
+      if (catId != null && positiveCategoryIds.has(Number(catId))) positive++;
+    }
+    if (rows.length < LIMIT) break;
+  }
+
+  const data = { uniqueReplyCount: unique, positiveReplyCount: positive };
+  replyMetricsCache.set(key, { fetchedAt: Date.now(), data });
+  return data;
 }
 
 export function aggregateAnalytics(rows: SmartleadAnalytics[]) {
