@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { Inbox, Search, RefreshCw, Loader2, Mail, MailOpen, Megaphone, ChevronLeft, ChevronDown, ChevronRight, ArrowDownRight, ArrowUpRight, Check } from "lucide-react";
+import { Inbox, Search, RefreshCw, Loader2, Mail, MailOpen, Megaphone, ChevronLeft, ChevronDown, ChevronUp, ChevronRight, ArrowDownRight, ArrowUpRight, Check } from "lucide-react";
 
 type Thread = {
   threadKey: string;
@@ -146,6 +146,16 @@ export default function MasterInboxPage() {
   const [categoriesOpen, setCategoriesOpen] = useState(true);
   const [clientsOpen, setClientsOpen] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      await fetchList();
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const canAccess = !!user && ["admin", "superadmin"].includes(user.role);
 
@@ -206,7 +216,25 @@ export default function MasterInboxPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ actor: user.email, action: "mark-read" }),
       });
-      setData((prev) => prev ? { ...prev, threads: prev.threads.map((t) => t.threadKey === key ? { ...t, locallyReadAt: new Date().toISOString() } : t), unreadCount: Math.max(0, prev.unreadCount - (prev.threads.find((t) => t.threadKey === key && !t.locallyReadAt) ? 1 : 0)) } : prev);
+      setData((prev) => prev ? {
+        ...prev,
+        threads: prev.threads.map((t) => t.threadKey === key
+          ? {
+              ...t,
+              // Merge the freshly-fetched thread fields (notably category, which
+              // may have been changed in Smartlead since the list was last polled).
+              ...(json?.thread ? {
+                category: json.thread.category ?? t.category,
+                leadFirstName: json.thread.leadFirstName ?? t.leadFirstName,
+                leadLastName: json.thread.leadLastName ?? t.leadLastName,
+                leadEmail: json.thread.leadEmail ?? t.leadEmail,
+                campaignName: json.thread.campaignName ?? t.campaignName,
+              } : {}),
+              locallyReadAt: new Date().toISOString(),
+            }
+          : t),
+        unreadCount: Math.max(0, prev.unreadCount - (prev.threads.find((t) => t.threadKey === key && !t.locallyReadAt) ? 1 : 0)),
+      } : prev);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Network error");
     } finally {
@@ -253,7 +281,12 @@ export default function MasterInboxPage() {
 
   const selectedThread = useMemo(() => {
     if (!selectedKey || !data) return null;
-    return data.threads.find((t) => t.threadKey === selectedKey) || threadData?.thread || null;
+    const fromList = data.threads.find((t) => t.threadKey === selectedKey);
+    const fromFetch = threadData?.thread;
+    // Prefer the freshly-fetched thread (has the latest category from Smartlead)
+    // but fall back to list data while the fetch is in-flight.
+    if (fromFetch) return fromList ? { ...fromList, ...fromFetch } : fromFetch;
+    return fromList || null;
   }, [selectedKey, data, threadData]);
 
   if (!hydrated) return <div className="p-6 text-sm text-slate-500">Loading…</div>;
@@ -504,7 +537,19 @@ export default function MasterInboxPage() {
         </aside>
 
         <section className="w-[380px] shrink-0 border-r border-slate-200 bg-white flex flex-col">
-          <div className="px-3 py-2.5 border-b border-slate-200">
+          <div className="px-3 pt-3 pb-1 flex items-center justify-between">
+            <h2 className="text-[15px] font-bold text-slate-900">Inbox</h2>
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              title="Refresh inbox"
+              aria-label="Refresh inbox"
+              className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-60"
+            >
+              <RefreshCw size={14} className={refreshing ? "animate-spin text-[#6800FF]" : "text-slate-500"} />
+            </button>
+          </div>
+          <div className="px-3 pb-2.5 border-b border-slate-200">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
               <input
@@ -776,7 +821,8 @@ function ThreadView({
               const prev = idx > 0 ? messages[idx - 1] : null;
               const stripSubject = (s: string) => (s || "").replace(/^(re:|fwd:)\s*/i, "").trim();
               const showSubject = !prev || stripSubject(m.subject) !== stripSubject(prev.subject);
-              return <MessageCard key={m.messageId} message={m} showSubject={showSubject} />;
+              const isLast = idx === messages.length - 1;
+              return <MessageCard key={m.messageId} message={m} showSubject={showSubject} defaultExpanded={isLast} />;
             })
           )}
         </div>
@@ -785,41 +831,84 @@ function ThreadView({
   );
 }
 
-function MessageCard({ message, showSubject }: { message: Message; showSubject?: boolean }) {
+function MessageCard({ message, showSubject, defaultExpanded }: { message: Message; showSubject?: boolean; defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(!!defaultExpanded);
   const isReply = (message.type || "").toUpperCase() === "REPLY";
-  const partyEmail = isReply ? message.fromEmail : message.toEmail;
   const fmtTime = (iso: string | null) => {
     if (!iso) return "";
     const d = new Date(iso);
-    return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
   };
-  const label = isReply ? "Reply from" : "Sent to";
+  const subject = (message.subject || "").trim();
+  const previewText = (message.body || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;/g, " ")
+    .replace(/&[a-z]+;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const hasBody = !!message.body;
+
   return (
     <div className={`rounded-xl bg-white border ${isReply ? "border-emerald-200/70" : "border-slate-200"} shadow-[0_1px_2px_rgba(0,0,0,0.03)] overflow-hidden`}>
-      {/* Direction tag + sender row */}
-      <div className="px-5 pt-4 pb-2 flex items-center gap-2 flex-wrap">
-        <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+      {/* Top row: direction tag + subject (if shown) + time */}
+      <div className="px-5 pt-4 pb-2 flex items-start gap-2">
+        <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 mt-0.5 ${
           isReply ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
         }`}>
           {isReply ? <ArrowDownRight size={10} /> : <ArrowUpRight size={10} />}
-          {label}
+          {isReply ? "Reply" : "Sent"}
         </span>
-        <span className="text-xs font-semibold text-slate-700 truncate min-w-0 flex-1" title={partyEmail}>{partyEmail || "(unknown)"}</span>
+        {showSubject && subject ? (
+          <h3 className="text-[14px] font-semibold text-slate-900 leading-snug truncate flex-1 min-w-0" title={subject}>{subject}</h3>
+        ) : (
+          <span className="flex-1" />
+        )}
         <span className="text-[11px] text-slate-400 tabular-nums shrink-0 whitespace-nowrap">{fmtTime(message.time)}</span>
       </div>
-      {showSubject && message.subject && (
-        <p className="px-5 pb-1 text-[12px] font-medium text-slate-600 truncate" title={message.subject}>{message.subject}</p>
-      )}
-      <div className="px-5 pb-5 pt-2">
-        {message.body ? (
-          <div
-            className="prose prose-sm max-w-none text-[13.5px] leading-[1.65] text-slate-700 [&_a]:text-[#6800FF] [&_a]:underline [&_p]:my-2.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"
-            dangerouslySetInnerHTML={{ __html: message.body }}
-          />
+
+      {/* From / To rows */}
+      <div className="px-5 pb-2 space-y-1">
+        <div className="flex items-center gap-2 text-[12px]">
+          <Mail size={11} className="text-slate-400 shrink-0" />
+          <span className="font-semibold text-slate-700 truncate" title={message.fromEmail}>{message.fromEmail || "(unknown)"}</span>
+        </div>
+        {message.toEmail && (
+          <div className="flex items-center gap-2 text-[12px] text-slate-500 pl-[18px]">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">To:</span>
+            <span className="truncate" title={message.toEmail}>{message.toEmail}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Body — preview or full */}
+      <div className="px-5 pb-3 pt-2">
+        {hasBody ? (
+          expanded ? (
+            <div
+              className="prose prose-sm max-w-none text-[13.5px] leading-[1.65] text-slate-700 [&_a]:text-[#6800FF] [&_a]:underline [&_p]:my-2.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"
+              dangerouslySetInnerHTML={{ __html: message.body }}
+            />
+          ) : (
+            <p className="text-[13px] text-slate-600 line-clamp-2 leading-relaxed">{previewText || "(no preview)"}</p>
+          )
         ) : (
           <p className="text-xs text-slate-400 italic">No body content.</p>
         )}
       </div>
+
+      {/* Expand / collapse toggle */}
+      {hasBody && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full py-2 border-t border-slate-100 hover:bg-slate-50 flex items-center justify-center text-slate-400 hover:text-[#6800FF] transition-colors"
+          aria-label={expanded ? "Collapse message" : "Expand message"}
+          title={expanded ? "Collapse" : "Show full email"}
+        >
+          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+      )}
     </div>
   );
 }

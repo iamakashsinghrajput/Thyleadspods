@@ -23,6 +23,7 @@ const InboxThreadSchema = new Schema({
   locallyReadAt: { type: Date, default: null },
   syncedAt: { type: Date, default: Date.now },
   messageHistorySyncedAt: { type: Date, default: null },
+  categorySyncedAt: { type: Date, default: null },
 }, { strict: false, timestamps: true });
 
 InboxThreadSchema.index({ lastReplyAt: -1 });

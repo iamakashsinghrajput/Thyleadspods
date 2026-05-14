@@ -3,7 +3,8 @@ import { connectDB } from "@/lib/mongodb";
 import InboxSyncState from "@/lib/models/inbox-sync-state";
 import InboxThread from "@/lib/models/inbox-thread";
 import InboxMessage from "@/lib/models/inbox-message";
-import { syncThreadMessages } from "@/lib/inbox-sync";
+import { syncThreadMessages, refreshThreadCategory } from "@/lib/inbox-sync";
+import { fetchLeadCategories } from "@/lib/smartlead";
 
 function authorized(req: NextRequest): boolean {
   const expected = (process.env.INBOX_WEBHOOK_SECRET || "").trim();
@@ -40,12 +41,60 @@ type WebhookEvent = {
   lead_email?: string;
   sl_lead_email?: string;
   message_id?: string;
+  // Category-change event fields
+  lead_category_id?: number | string;
+  new_category_id?: number | string;
+  category_id?: number | string;
+  lead_category_name?: string;
+  new_category_name?: string;
+  category_name?: string;
+  category?: string;
 };
 
 function isReplyEvent(e: WebhookEvent): boolean {
   const t = String(e.event_type || "").toUpperCase();
   if (!t) return true; // no event_type — accept (legacy / Smartlead version drift)
   return t.includes("REPLY");
+}
+
+function isCategoryEvent(e: WebhookEvent): boolean {
+  const t = String(e.event_type || "").toUpperCase();
+  if (t.includes("CATEGORY")) return true;
+  // Some Smartlead webhooks fire on lead status change with category info inline.
+  if (t.includes("LEAD_STATUS") || t.includes("STATUS_CHANGED")) return true;
+  // Defensive: accept events that carry a category id even if the type is named oddly.
+  const data = (e.data || {}) as Record<string, unknown>;
+  const cands = [
+    e.lead_category_id, e.new_category_id, e.category_id,
+    data.lead_category_id, data.new_category_id, data.category_id,
+  ];
+  return cands.some((v) => v != null);
+}
+
+function extractCategoryInfo(e: WebhookEvent): { categoryId: number | null; categoryName: string } {
+  const data = (e.data || {}) as Record<string, unknown>;
+  const idCandidates: unknown[] = [
+    e.new_category_id, e.lead_category_id, e.category_id,
+    data.new_category_id, data.lead_category_id, data.category_id,
+  ];
+  let categoryId: number | null = null;
+  for (const v of idCandidates) {
+    if (v == null) continue;
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) { categoryId = n; break; }
+  }
+  const o = e as unknown as Record<string, unknown>;
+  const nameCandidates: unknown[] = [
+    e.new_category_name, e.lead_category_name, e.category_name, e.category,
+    o.lead_category, o.reply_category,
+    data.new_category_name, data.lead_category_name, data.category_name, data.category,
+    data.lead_category, data.reply_category,
+  ];
+  let categoryName = "";
+  for (const v of nameCandidates) {
+    if (typeof v === "string" && v.trim()) { categoryName = v.trim(); break; }
+  }
+  return { categoryId, categoryName };
 }
 
 function parseDate(s: string | null | undefined): Date | null {
@@ -227,18 +276,54 @@ export async function POST(req: NextRequest) {
 
   if (events.length === 0) return NextResponse.json({ ok: true, processed: 0 });
 
-  // Only process reply events. Sent / open / click events would create
-  // outbound-only threads with no reply, which is exactly what the user
-  // doesn't want shown in the master inbox.
+  // Split events: reply events create/update threads with a new message,
+  // category events update an existing thread's category in place.
   const replyEvents = events.filter(isReplyEvent);
-  const skippedNonReply = events.length - replyEvents.length;
-  if (skippedNonReply > 0) {
-    console.log(`[smartlead-webhook] skipped ${skippedNonReply} non-reply event(s):`,
-      events.filter((e) => !isReplyEvent(e)).map((e) => e.event_type).join(", "));
+  const categoryEvents = events.filter((e) => !isReplyEvent(e) && isCategoryEvent(e));
+  const skippedOther = events.length - replyEvents.length - categoryEvents.length;
+  if (skippedOther > 0) {
+    console.log(`[smartlead-webhook] skipped ${skippedOther} non-reply / non-category event(s):`,
+      events.filter((e) => !isReplyEvent(e) && !isCategoryEvent(e)).map((e) => e.event_type).join(", "));
   }
-  if (replyEvents.length === 0) return NextResponse.json({ ok: true, processed: 0, skippedNonReply });
 
   await connectDB();
+
+  // ── Process category-change events (Smartlead → us category sync) ──
+  let categoryUpdates = 0;
+  if (categoryEvents.length > 0) {
+    let categoryNameById: Map<number, string> | null = null;
+    for (const e of categoryEvents) {
+      const { campaignId, leadId } = extractIds(e);
+      if (campaignId == null || leadId == null) continue;
+      const threadKey = `${leadId}:${campaignId}`;
+      let { categoryId, categoryName } = extractCategoryInfo(e);
+      if (!categoryName && categoryId != null) {
+        if (!categoryNameById) {
+          const cats = await fetchLeadCategories().catch(() => []);
+          categoryNameById = new Map();
+          for (const c of cats) if (c.id !== undefined && c.name) categoryNameById.set(Number(c.id), c.name);
+        }
+        categoryName = categoryNameById.get(categoryId) || "";
+      }
+      // If we still couldn't resolve, fall back to the live refresh helper —
+      // it'll fetch the lead row and look it up.
+      if (!categoryName && categoryId == null) {
+        await refreshThreadCategory(leadId, campaignId, { force: true }).catch(() => {});
+        categoryUpdates++;
+        continue;
+      }
+      const res = await InboxThread.updateOne(
+        { threadKey },
+        { $set: { category: categoryName, categorySyncedAt: new Date() } },
+      );
+      if (res.matchedCount > 0) categoryUpdates++;
+    }
+    console.log(`[smartlead-webhook] category updates applied: ${categoryUpdates}/${categoryEvents.length}`);
+  }
+
+  if (replyEvents.length === 0) {
+    return NextResponse.json({ ok: true, processed: 0, categoryUpdates, skippedOther });
+  }
 
   // Build a map of (leadId, campaignId) -> inline payload data we can persist
   // directly. EMAIL_REPLY events usually carry the new message in the payload
@@ -275,6 +360,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     processed: targets.size,
+    categoryUpdates,
     results: detailed,
   });
 }

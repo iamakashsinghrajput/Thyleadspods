@@ -7,12 +7,82 @@ import {
   fetchCampaign,
   fetchCampaignLeads,
   fetchLead,
+  fetchLeadInCampaign,
   fetchLeadMessageHistory,
   fetchLeadCategories,
   invalidateSmartleadCache,
   type SmartleadMessageHistoryItem,
   type SmartleadLeadRow,
 } from "@/lib/smartlead";
+
+const CATEGORY_REFRESH_TTL_MS = 5_000;
+let cachedCategories: { fetchedAt: number; map: Map<number, string> } | null = null;
+
+async function getCategoryMap(): Promise<Map<number, string>> {
+  if (cachedCategories && Date.now() - cachedCategories.fetchedAt < 5 * 60_000) {
+    return cachedCategories.map;
+  }
+  const cats = await fetchLeadCategories().catch(() => []);
+  const map = new Map<number, string>();
+  for (const c of cats) {
+    if (c.id !== undefined && c.name) map.set(Number(c.id), c.name);
+  }
+  cachedCategories = { fetchedAt: Date.now(), map };
+  return map;
+}
+
+// Pull the current category for a single (lead, campaign) pair from Smartlead
+// and update the InboxThread doc. Cheap (single API call) and rate-limited via
+// the existing token bucket in smartlead.ts. Skips re-fetching if we just
+// refreshed within CATEGORY_REFRESH_TTL_MS.
+export async function refreshThreadCategory(
+  leadId: number,
+  campaignId: number,
+  opts?: { force?: boolean },
+): Promise<{ changed: boolean; category: string }> {
+  await connectDB();
+  const threadKey = `${leadId}:${campaignId}`;
+  const existing = await InboxThread.findOne({ threadKey })
+    .select("category categorySyncedAt")
+    .lean<{ category?: string; categorySyncedAt?: Date | null }>();
+  if (!existing) return { changed: false, category: "" };
+
+  if (!opts?.force && existing.categorySyncedAt
+      && Date.now() - new Date(existing.categorySyncedAt).getTime() < CATEGORY_REFRESH_TTL_MS) {
+    return { changed: false, category: existing.category || "" };
+  }
+
+  const row = await fetchLeadInCampaign(String(campaignId), String(leadId), { force: !!opts?.force });
+  if (!row) {
+    console.warn(`[refreshThreadCategory] no row from Smartlead for ${threadKey}`);
+    await InboxThread.updateOne({ threadKey }, { $set: { categorySyncedAt: new Date() } });
+    return { changed: false, category: existing.category || "" };
+  }
+  const map = asAny(row.campaign_lead_map);
+  const r = asAny(row);
+  const catId = (map.lead_category_id ?? r.lead_category_id ?? null) as number | null;
+  const leadStatus = String(map.status || r.status || "").toUpperCase();
+
+  let newCategory = "";
+  if (catId != null) {
+    const cats = await getCategoryMap();
+    newCategory = cats.get(Number(catId)) || "";
+  }
+
+  const changed = newCategory !== (existing.category || "");
+  console.log(`[refreshThreadCategory] ${threadKey}: catId=${catId} name="${newCategory}" prev="${existing.category || ""}" changed=${changed}`);
+  await InboxThread.updateOne(
+    { threadKey },
+    {
+      $set: {
+        category: newCategory,
+        leadStatus,
+        categorySyncedAt: new Date(),
+      },
+    },
+  );
+  return { changed, category: newCategory };
+}
 
 // Webhooks are the primary source of fresh data; the full poll-sync is only a
 // backstop in case a webhook is missed. So allow data to age 6h before the

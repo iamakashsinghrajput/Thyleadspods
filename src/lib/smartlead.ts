@@ -363,6 +363,20 @@ export async function fetchCampaignLeads(campaignId: string, opts: { limit?: num
   return smartleadFetch<SmartleadLeadsResponse>(path);
 }
 
+// Single-lead lookup that includes the campaign_lead_map (which holds the
+// current category id + status). Used by the inbox to pull the latest
+// category from Smartlead when the user opens a thread.
+export async function fetchLeadInCampaign(campaignId: string, leadId: string, opts?: { force?: boolean }): Promise<SmartleadLeadRow | null> {
+  try {
+    const path = `/campaigns/${encodeURIComponent(campaignId)}/leads/${encodeURIComponent(leadId)}`;
+    const data = await smartleadFetch<SmartleadLeadRow | { data?: SmartleadLeadRow }>(path, opts);
+    if (data && typeof data === "object" && "data" in data && data.data) return data.data as SmartleadLeadRow;
+    return data as SmartleadLeadRow;
+  } catch {
+    return null;
+  }
+}
+
 export interface SmartleadCampaignStatRow {
   stats_id?: string;
   lead_id?: number | string;

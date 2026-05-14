@@ -4,7 +4,7 @@ import UserModel from "@/lib/models/user";
 import { SUPERADMIN_EMAIL } from "@/lib/user-approval";
 import InboxThread from "@/lib/models/inbox-thread";
 import InboxMessage from "@/lib/models/inbox-message";
-import { syncThreadMessages } from "@/lib/inbox-sync";
+import { syncThreadMessages, refreshThreadCategory } from "@/lib/inbox-sync";
 import { updateLeadCategory } from "@/lib/smartlead";
 
 async function actorRole(email: string): Promise<string> {
@@ -47,6 +47,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ lead
       void syncThreadMessages(leadId, campaignId);
     }
   }
+
+  // Pull the latest category from Smartlead so changes made in the Smartlead
+  // master inbox flow back here. Wait for it (one cheap call) so the response
+  // reflects the current state.
+  await refreshThreadCategory(leadId, campaignId).catch(() => {});
 
   const [updatedThread, messages] = await Promise.all([
     InboxThread.findOne({ threadKey }).lean(),
