@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
 
   const actor = String(formData.get("actor") || "");
   const role = await actorRole(actor);
-  if (role !== "superadmin" && role !== "admin") {
+  if (role !== "superadmin" && role !== "admin" && role !== "pod") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

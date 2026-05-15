@@ -19,6 +19,8 @@ type CampaignRow = {
   totalCount: number;
   uniqueOpenCount: number;
   uniqueClickCount: number;
+  uniqueReplyCount: number;
+  positiveReplyCount: number;
 };
 
 type Counts = { all: number; active: number; paused: number; stopped: number; completed: number; drafted: number };
@@ -209,8 +211,8 @@ export default function CampaignsPage() {
                   <th className="text-left px-4 py-3 w-[36%]">Campaign</th>
                   <th className="text-right px-4 py-3">Leads</th>
                   <th className="text-right px-4 py-3">Sent</th>
-                  <th className="text-right px-4 py-3">Opened</th>
-                  <th className="text-right px-4 py-3">Clicked</th>
+                  <th className="text-right px-4 py-3">Positive Reply</th>
+                  <th className="text-right px-4 py-3">Unique Reply</th>
                   <th className="text-right px-4 py-3">Replied</th>
                   <th className="text-right px-4 py-3">Bounced</th>
                 </tr>
@@ -218,9 +220,11 @@ export default function CampaignsPage() {
               <tbody className="divide-y divide-slate-100">
                 {filtered.map((c) => {
                   const st = statusStyle(c.status);
+                  const positiveReply = c.positiveReplyCount ?? 0;
+                  const uniqueReply = c.uniqueReplyCount ?? 0;
                   const replyRate = pct(c.replyCount, c.sentCount);
-                  const openRate = pct(c.openCount, c.sentCount);
-                  const clickRate = pct(c.clickCount, c.sentCount);
+                  const positiveReplyRate = pct(positiveReply, c.sentCount);
+                  const uniqueReplyRate = pct(uniqueReply, c.sentCount);
                   const bounceRate = pct(c.bounceCount, c.sentCount);
                   return (
                     <tr
@@ -262,12 +266,12 @@ export default function CampaignsPage() {
                         <span className="text-[13px] font-semibold text-slate-900 tabular-nums">{c.sentCount.toLocaleString()}</span>
                       </td>
                       <td className="px-4 py-3.5 text-right">
-                        <span className="text-[13px] font-semibold text-violet-700 tabular-nums">{c.openCount.toLocaleString()}</span>
-                        <span className="block text-[10px] text-slate-400 tabular-nums">{openRate}</span>
+                        <span className="text-[13px] font-semibold text-violet-700 tabular-nums">{positiveReply.toLocaleString()}</span>
+                        <span className="block text-[10px] text-slate-400 tabular-nums">{positiveReplyRate}</span>
                       </td>
                       <td className="px-4 py-3.5 text-right">
-                        <span className="text-[13px] font-semibold text-amber-700 tabular-nums">{c.clickCount.toLocaleString()}</span>
-                        <span className="block text-[10px] text-slate-400 tabular-nums">{clickRate}</span>
+                        <span className="text-[13px] font-semibold text-amber-700 tabular-nums">{uniqueReply.toLocaleString()}</span>
+                        <span className="block text-[10px] text-slate-400 tabular-nums">{uniqueReplyRate}</span>
                       </td>
                       <td className="px-4 py-3.5 text-right">
                         <span className="text-[13px] font-semibold text-emerald-700 tabular-nums">{c.replyCount.toLocaleString()}</span>

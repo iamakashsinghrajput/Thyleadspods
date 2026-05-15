@@ -2,11 +2,12 @@
 
 import { use, useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Search, X, Upload, Pickaxe, Plus, Pencil, Check, Download } from "lucide-react";
+import { ArrowLeft, Search, X, Upload, Pickaxe, Plus, Pencil, Check, Download, Calendar, Megaphone, Building2, Loader2, UploadCloud, Link2, Ban, CheckCircle2, AlertTriangle, Save, ListX, RefreshCw } from "lucide-react";
 import { useData } from "@/lib/data-context";
 import { useAuth } from "@/lib/auth-context";
 import { useNotifications } from "@/lib/notification-context";
 import { usePods } from "@/lib/pod-context";
+import { useSidebar } from "@/lib/sidebar-context";
 import type { ClientDetail, MeetingStatus } from "@/lib/client-data";
 import { fireSideCannons } from "@/lib/confetti-side-cannons";
 import ConfirmDelete from "@/components/confirm-delete";
@@ -108,6 +109,10 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     companyName: "", contactName: "", contactTitle: "", contactEmail: "", contactNumber: "",
   }));
   const [viewMeeting, setViewMeeting] = useState<ClientDetail | null>(null);
+  const [activeTab, setActiveTab] = useState<"meetings" | "campaigns" | "accounts">("meetings");
+  const { setCollapsed: setMainSidebarCollapsed } = useSidebar();
+  useEffect(() => { setMainSidebarCollapsed(true); }, [setMainSidebarCollapsed]);
+  const [campaignFilterSlot, setCampaignFilterSlot] = useState<HTMLDivElement | null>(null);
   const [popupRemarks, setPopupRemarks] = useState("");
   const [popupAdditionalInfo, setPopupAdditionalInfo] = useState("");
   const [popupSummary, setPopupSummary] = useState("");
@@ -115,17 +120,19 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [celebration, setCelebration] = useState<string | null>(null);
   const [smartleadIdsDraft, setSmartleadIdsDraft] = useState("");
   const [smartleadSaving, setSmartleadSaving] = useState(false);
-  const [smartleadSavedAt, setSmartleadSavedAt] = useState(0);
+  const [smartleadSavedAt, setSmartleadSavedAt] = useState(false);
   const [smartleadPickerOpen, setSmartleadPickerOpen] = useState(false);
   const [smartleadPickerLoading, setSmartleadPickerLoading] = useState(false);
   const [smartleadPickerError, setSmartleadPickerError] = useState("");
   const [smartleadPickerQuery, setSmartleadPickerQuery] = useState("");
   const [smartleadPickerStatus, setSmartleadPickerStatus] = useState<"all" | "active" | "paused" | "completed" | "other">("all");
   const [smartleadPickerCampaigns, setSmartleadPickerCampaigns] = useState<Array<{ id: number; name: string; status: string }>>([]);
-  useEffect(() => {
-    setSmartleadIdsDraft((project?.smartleadCampaignIds || []).join(", "));
-  }, [project?.smartleadCampaignIds]);
   const smartleadCurrent = (project?.smartleadCampaignIds || []).join(", ");
+  const [smartleadCurrentSnapshot, setSmartleadCurrentSnapshot] = useState(smartleadCurrent);
+  if (smartleadCurrentSnapshot !== smartleadCurrent) {
+    setSmartleadCurrentSnapshot(smartleadCurrent);
+    setSmartleadIdsDraft(smartleadCurrent);
+  }
   const smartleadDirty = smartleadIdsDraft.trim() !== smartleadCurrent;
   const selectedSmartleadIds = useMemo(
     () => new Set(smartleadIdsDraft.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean)),
@@ -137,8 +144,8 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     const ids = smartleadIdsDraft.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
     await Promise.resolve(updateProject(project.id, { smartleadCampaignIds: ids }));
     setSmartleadSaving(false);
-    setSmartleadSavedAt(Date.now());
-    setTimeout(() => setSmartleadSavedAt(0), 2500);
+    setSmartleadSavedAt(true);
+    setTimeout(() => setSmartleadSavedAt(false), 2500);
   }
   async function openSmartleadPicker() {
     if (!user?.email) return;
@@ -394,9 +401,49 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         </div>
       </div>
 
-      <div className="px-8 pb-8 space-y-8">
+      <div className="pb-8 flex items-stretch min-h-[calc(100vh-200px)]">
+        <aside className="w-60 shrink-0 border-r-2 border-slate-300 bg-slate-50/60 pl-8 pr-6 pt-4 shadow-[inset_-1px_0_0_rgba(15,23,42,0.04)]">
+          <div className="sticky top-4">
+            <div className="px-2 pb-2 text-[10.5px] font-bold uppercase tracking-wider text-slate-500">Sections</div>
+            <nav className="space-y-0.5">
+              {([
+                { key: "meetings" as const, label: "Meeting Details", icon: Calendar, count: records.length },
+                { key: "campaigns" as const, label: "Campaign Details", icon: Megaphone, count: (project?.smartleadCampaignIds || []).length || undefined },
+                { key: "accounts" as const, label: "Lead Accounts", icon: Building2 },
+              ]).map((t) => {
+                const Icon = t.icon;
+                const active = activeTab === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => setActiveTab(t.key)}
+                    className={`w-full text-left px-2.5 py-2 rounded-lg text-[13px] flex items-center justify-between gap-2 transition-colors ${
+                      active ? "bg-[#6800FF] text-white font-semibold shadow-sm" : "text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <span className="inline-flex items-center gap-2 min-w-0">
+                      <Icon size={14} className="shrink-0" />
+                      <span className="truncate">{t.label}</span>
+                    </span>
+                    {typeof t.count === "number" && (
+                      <span className={`text-[10px] tabular-nums rounded px-1.5 py-0.5 ${active ? "bg-white/20 text-white" : "bg-slate-100 text-slate-500"}`}>{t.count}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+            {activeTab === "campaigns" && (
+              <div
+                ref={(el) => setCampaignFilterSlot(el)}
+                className="mt-5 pt-4 border-t border-slate-200"
+              />
+            )}
+          </div>
+        </aside>
 
-        {isAdmin && (
+        <main className="flex-1 min-w-0 pl-8 pr-8 pt-2 space-y-8">
+
+        {activeTab === "campaigns" && isAdmin && (
           <section className="bg-white border border-slate-200 rounded-xl p-4">
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div className="min-w-0">
@@ -612,6 +659,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           </>
         )}
 
+        {activeTab === "meetings" && (
         <section>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-baseline gap-3 flex-wrap">
@@ -843,11 +891,17 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </div>
           </div>
         </section>
-
-        {project && (
-          <CampaignDetails projectId={project.id} actorEmail={user?.email || ""} />
         )}
 
+        {activeTab === "campaigns" && project && (
+          <CampaignDetails projectId={project.id} actorEmail={user?.email || ""} filterSlot={campaignFilterSlot} />
+        )}
+
+        {activeTab === "accounts" && project && (
+          <LeadAccountsSection projectId={project.id} clientName={clientName} actorEmail={user?.email || ""} />
+        )}
+
+        {activeTab === "meetings" && (
         <section>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
@@ -958,6 +1012,9 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </div>
           </div>
         </section>
+        )}
+
+        </main>
       </div>
 
       {viewMeeting && (
@@ -1159,3 +1216,435 @@ function CelebrationBanner({ message, onClose }: { message: string; onClose: () 
     </div>
   );
 }
+
+type LeadAccountGroup = {
+  rootKey: string;
+  displayDomain: string;
+  company: string;
+  domains: { domain: string; company: string }[];
+};
+
+type LeadGoogleSheetMeta = {
+  sheetUrl: string;
+  spreadsheetId: string;
+  tabTitle: string;
+  tabSheetId: number | null;
+  connectedAt: string | null;
+  connectedBy: string;
+  lastSyncAt: string | null;
+  lastSyncError: string;
+  domainColumn: string;
+  companyColumn: string;
+};
+
+type LeadListResponse = {
+  groups: LeadAccountGroup[];
+  totals: { uploaded: number; net: number; uniqueDomains: number; manualDnc: number; manualDncMatched: number };
+  manualDnc: string[];
+  googleSheet?: LeadGoogleSheetMeta | null;
+  syncedNow?: boolean;
+  syncError?: string;
+  updatedAt: string | null;
+};
+
+function LeadAccountsSection({ projectId, clientName, actorEmail }: { projectId: string; clientName: string; actorEmail: string }) {
+  const [data, setData] = useState<LeadListResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadFlash, setUploadFlash] = useState("");
+  const [uploadError, setUploadError] = useState("");
+  const [sheetModalOpen, setSheetModalOpen] = useState(false);
+  const [dncModalOpen, setDncModalOpen] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    if (!actorEmail) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/accounts/list?actor=${encodeURIComponent(actorEmail)}&projectId=${encodeURIComponent(projectId)}`, { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) { setError(json.error || "Failed to load accounts"); return; }
+      setData(json);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId, actorEmail]);
+
+  useEffect(() => { void fetchData(); }, [fetchData]);
+
+  const handleUpload = useCallback(async (file: File) => {
+    if (!actorEmail) return;
+    setUploading(true);
+    setUploadError("");
+    setUploadFlash("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("actor", actorEmail);
+      fd.append("projectId", projectId);
+      const res = await fetch("/api/accounts/upload", { method: "POST", body: fd });
+      const json = await res.json();
+      if (!res.ok) { setUploadError(json.error || "Upload failed"); return; }
+      setUploadFlash(`Uploaded ${json.uploaded} rows · ${json.uniqueDomains} unique`);
+      await fetchData();
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "Network error");
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }, [actorEmail, projectId, fetchData]);
+
+  const groups = useMemo(() => data?.groups || [], [data?.groups]);
+  const updatedAt = data?.updatedAt || null;
+
+  const flatRows = useMemo(() => {
+    const rows: { domain: string; company: string; rootKey: string }[] = [];
+    for (const g of groups) {
+      for (const d of g.domains) rows.push({ domain: d.domain, company: d.company || g.company, rootKey: g.rootKey });
+    }
+    return rows;
+  }, [groups]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return flatRows;
+    return flatRows.filter((r) => r.domain.includes(q) || r.company.toLowerCase().includes(q) || r.rootKey.includes(q));
+  }, [flatRows, search]);
+
+  return (
+    <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/60 flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h2 className="text-[14px] font-semibold text-slate-800">Lead Accounts</h2>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            {flatRows.length.toLocaleString()} rows · {groups.length.toLocaleString()} unique domains for {clientName}
+            {data?.googleSheet && (
+              <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-semibold text-[#6800FF]">
+                <Link2 size={9} /> {data.googleSheet.tabTitle}{data.syncedNow ? " · synced" : ""}
+              </span>
+            )}
+            {data?.syncError && (
+              <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-semibold text-rose-700">
+                <AlertTriangle size={9} /> {data.syncError}
+              </span>
+            )}
+            {updatedAt && <span className="ml-2 text-slate-400">· last synced {new Date(updatedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search…"
+              className="w-44 pl-8 pr-2 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10"
+            />
+          </div>
+          <button
+            onClick={() => setDncModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg transition-colors"
+          >
+            <Ban size={12} /> DNC ({data?.totals?.manualDnc ?? 0})
+          </button>
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors disabled:opacity-60"
+          >
+            {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Upload XLSX
+          </button>
+          <button
+            onClick={() => setSheetModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#6800FF] hover:bg-[#5800DD] rounded-lg transition-colors"
+          >
+            <Link2 size={12} /> {data?.googleSheet ? "Change Sheet" : "Connect Sheet"}
+          </button>
+          <button onClick={fetchData} disabled={loading} className="inline-flex items-center justify-center w-8 h-8 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-60" title="Refresh">
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleUpload(f);
+            }}
+          />
+        </div>
+      </div>
+
+      {(uploadError || uploadFlash) && (
+        <div className={`mx-4 mt-3 text-xs px-3 py-2 rounded-lg border ${uploadError ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-emerald-50 border-emerald-200 text-emerald-700"}`}>
+          {uploadError || uploadFlash}
+        </div>
+      )}
+      <div className="max-h-[calc(100vh-280px)] overflow-auto">
+        {loading && flatRows.length === 0 ? (
+          <div className="flex items-center justify-center py-16 text-sm text-slate-400">
+            <Loader2 size={14} className="animate-spin mr-2" /> Loading accounts…
+          </div>
+        ) : error ? (
+          <div className="m-4 p-4 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-lg">{error}</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-16 text-sm text-slate-400">
+            <Building2 size={22} className="text-slate-300 mx-auto mb-2" />
+            {flatRows.length > 0 ? "No matches for your search." : "No accounts available yet for this client."}
+          </div>
+        ) : (
+          <table className="border-collapse text-[12.5px]" style={{ minWidth: "100%" }}>
+            <thead>
+              <tr className="sticky top-0 z-20 bg-[#f1f3f4] text-slate-600">
+                <th className="sticky left-0 z-30 bg-[#f1f3f4] w-12 h-7 px-2 border-b border-r border-slate-300 text-[10.5px] font-semibold"></th>
+                <th className="h-7 px-3 border-b border-r border-slate-300 text-[10.5px] font-semibold text-center min-w-[120px]">A</th>
+                <th className="h-7 px-3 border-b border-r border-slate-300 text-[10.5px] font-semibold text-center min-w-[120px]">B</th>
+              </tr>
+              <tr className="sticky top-7 z-20 bg-white text-slate-700">
+                <th className="sticky left-0 z-30 bg-[#f8f9fa] w-12 h-9 px-2 border-b border-r border-slate-300 text-[10.5px] font-bold text-center">1</th>
+                <th className="h-9 px-3 border-b border-r border-slate-300 text-left text-[11.5px] font-semibold min-w-[260px]">Domain</th>
+                <th className="h-9 px-3 border-b border-r border-slate-300 text-left text-[11.5px] font-semibold min-w-[320px]">Company</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r, i) => (
+                <tr key={`${r.domain}-${i}`} className="hover:bg-[#f0fbff]">
+                  <td className="sticky left-0 z-10 bg-[#f8f9fa] w-12 h-8 px-2 border-b border-r border-slate-200 text-[10.5px] font-semibold text-slate-500 text-center tabular-nums">{i + 2}</td>
+                  <td className="h-8 px-3 border-b border-r border-slate-200 text-slate-900 font-medium">{r.domain}</td>
+                  <td className="h-8 px-3 border-b border-r border-slate-200 text-slate-700 truncate max-w-md">{r.company || <span className="text-slate-300">—</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {sheetModalOpen && (
+        <LeadConnectSheetModal
+          actor={actorEmail}
+          projectId={projectId}
+          current={data?.googleSheet || null}
+          onClose={() => setSheetModalOpen(false)}
+          onConnected={async () => { setSheetModalOpen(false); await fetchData(); }}
+        />
+      )}
+
+      {dncModalOpen && (
+        <LeadDncModal
+          actor={actorEmail}
+          projectId={projectId}
+          initial={data?.manualDnc || []}
+          totalsOnList={data?.totals?.manualDnc || 0}
+          totalsMatched={data?.totals?.manualDncMatched || 0}
+          onClose={() => setDncModalOpen(false)}
+          onSaved={async () => { await fetchData(); }}
+        />
+      )}
+    </section>
+  );
+}
+
+type LeadTab = { title: string; sheetId: number; rowCount: number; columnCount: number };
+
+function LeadConnectSheetModal({ actor, projectId, current, onClose, onConnected }: {
+  actor: string;
+  projectId: string;
+  current: LeadGoogleSheetMeta | null;
+  onClose: () => void;
+  onConnected: () => Promise<void> | void;
+}) {
+  const [sheetUrl, setSheetUrl] = useState(current?.sheetUrl || "");
+  const [spreadsheetId, setSpreadsheetId] = useState(current?.spreadsheetId || "");
+  const [tabs, setTabs] = useState<LeadTab[] | null>(null);
+  const [selectedTab, setSelectedTab] = useState<string>(current?.tabTitle || "");
+  const [loadingTabs, setLoadingTabs] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  async function loadTabs() {
+    setError(""); setSuccess(""); setTabs(null); setLoadingTabs(true);
+    try {
+      const res = await fetch("/api/accounts/connect-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor, projectId, sheetUrl }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(`${json.error || "Failed"}${json.hint ? ` — ${json.hint}` : ""}`); return; }
+      setSpreadsheetId(json.spreadsheetId);
+      setTabs(json.tabs || []);
+      if (!selectedTab && json.tabs?.length) setSelectedTab(json.tabs[0].title);
+    } catch (e) { setError(e instanceof Error ? e.message : "Network error"); }
+    finally { setLoadingTabs(false); }
+  }
+
+  async function connect() {
+    setError(""); setSuccess(""); setSaving(true);
+    try {
+      const tabMeta = tabs?.find((t) => t.title === selectedTab);
+      const res = await fetch("/api/accounts/save-tab", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor, projectId, sheetUrl, spreadsheetId, tabTitle: selectedTab, tabSheetId: tabMeta?.sheetId }),
+      });
+      let json: { error?: string; detectedHeaders?: string[]; uploaded?: number; domainColumn?: string; companyColumn?: string } = {};
+      try { json = await res.json(); } catch {}
+      if (!res.ok) {
+        const hdrs = Array.isArray(json.detectedHeaders) ? ` Headers seen: ${json.detectedHeaders.join(", ")}` : "";
+        setError(`${json.error || `HTTP ${res.status}`}${hdrs}`);
+        setSaving(false);
+        return;
+      }
+      setSuccess(`Synced ${json.uploaded ?? 0} rows from "${selectedTab}". Domain → "${json.domainColumn ?? "?"}"${json.companyColumn ? `, Company → "${json.companyColumn}"` : ""}.`);
+      await onConnected();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Network error");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-md bg-[#f0e6ff] text-[#6800FF] flex items-center justify-center"><Link2 size={15} /></span>
+            <div>
+              <h2 className="text-[14px] font-bold text-slate-900">Connect Google Sheet</h2>
+              <p className="text-[11px] text-slate-500">Live sync — the Lead Accounts tab refreshes every time it&apos;s opened.</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"><X size={15} /></button>
+        </div>
+        <div className="px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Step 1 · Sheet URL</label>
+            <p className="text-[11px] text-slate-500 mt-0.5 mb-2">Paste the link. The sheet must be set to <span className="font-semibold">&quot;Anyone with the link can view&quot;</span>.</p>
+            <div className="flex gap-2">
+              <input
+                value={sheetUrl}
+                onChange={(e) => setSheetUrl(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/…"
+                className="flex-1 px-3 py-2 text-[12.5px] font-mono bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10"
+              />
+              <button onClick={loadTabs} disabled={loadingTabs || !sheetUrl.trim()} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-slate-800 hover:bg-slate-900 rounded-lg transition-colors disabled:opacity-50">
+                {loadingTabs ? <Loader2 size={12} className="animate-spin" /> : null} Load tabs
+              </button>
+            </div>
+          </div>
+          {tabs && (
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Step 2 · Pick a tab</label>
+              <p className="text-[11px] text-slate-500 mt-0.5 mb-2">{tabs.length} {tabs.length === 1 ? "tab" : "tabs"} found.</p>
+              <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                {tabs.map((t) => (
+                  <button key={t.title} onClick={() => setSelectedTab(t.title)} className={`w-full text-left px-3 py-2 rounded-lg border transition-colors flex items-center justify-between gap-2 ${selectedTab === t.title ? "border-[#6800FF] bg-[#f0e6ff]" : "border-slate-200 hover:bg-slate-50"}`}>
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className={`w-3.5 h-3.5 rounded-full border-2 shrink-0 ${selectedTab === t.title ? "border-[#6800FF] bg-[#6800FF]" : "border-slate-300"}`} />
+                      <span className="text-[13px] font-semibold text-slate-900 truncate">{t.title}</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500 tabular-nums shrink-0">{t.rowCount} rows</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2.5 text-[11px] text-slate-600">
+            <p className="font-semibold text-slate-700 mb-1">Required fields:</p>
+            <ul className="space-y-0.5">
+              <li>• <span className="font-mono text-slate-900">Domain</span> — header can also be Website / URL / Site</li>
+              <li>• <span className="font-mono text-slate-900">Company</span> — header can also be Company Name / Account / Brand <span className="text-slate-400">(optional)</span></li>
+            </ul>
+          </div>
+          {error && <div className="text-[12px] px-3 py-2 rounded-lg border border-rose-200 bg-rose-50 text-rose-700">{error}</div>}
+          {success && <div className="text-[12px] px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700">{success}</div>}
+        </div>
+        <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/50 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+          <button onClick={connect} disabled={saving || !selectedTab || !tabs || tabs.length === 0} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#6800FF] hover:bg-[#5800DD] disabled:opacity-50 rounded-lg transition-colors">
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+            {saving ? "Connecting…" : "Connect & Sync"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LeadDncModal({ actor, projectId, initial, totalsOnList, totalsMatched, onClose, onSaved }: {
+  actor: string;
+  projectId: string;
+  initial: string[];
+  totalsOnList: number;
+  totalsMatched: number;
+  onClose: () => void;
+  onSaved: () => Promise<void> | void;
+}) {
+  const [text, setText] = useState(initial.join("\n"));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [flash, setFlash] = useState("");
+
+  async function save() {
+    setSaving(true); setError(""); setFlash("");
+    try {
+      const res = await fetch("/api/accounts/dnc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actor, projectId, raw: text }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setError(json.error || "Save failed"); return; }
+      setFlash(`Saved ${json.count} domains`);
+      await onSaved();
+    } catch (e) { setError(e instanceof Error ? e.message : "Network error"); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="w-8 h-8 rounded-md bg-rose-50 text-rose-600 flex items-center justify-center"><Ban size={15} /></span>
+            <div>
+              <h2 className="text-[14px] font-bold text-slate-900">DNC List for this Client</h2>
+              <p className="text-[11px] text-slate-500">{totalsOnList} on list · {totalsMatched} matched in current sheet.</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"><X size={15} /></button>
+        </div>
+        <div className="px-5 py-4 space-y-3">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={"One domain per line\nmamaearth.co\nnykaa.com"}
+            rows={10}
+            className="w-full px-3 py-2 text-[12.5px] font-mono bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#6800FF] focus:ring-2 focus:ring-[#6800FF]/10 resize-y"
+          />
+          <div className="text-[11px] text-slate-500 flex items-center gap-2">
+            <ListX size={11} className="text-slate-400" />
+            Matches root domain too — adding <span className="font-mono">mamaearth.co</span> will also exclude <span className="font-mono">mamaearth.ae</span>.
+          </div>
+          {error && <div className="text-[12px] px-3 py-2 rounded-lg border border-rose-200 bg-rose-50 text-rose-700">{error}</div>}
+          {flash && <div className="text-[12px] px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700">{flash}</div>}
+        </div>
+        <div className="px-5 py-3 border-t border-slate-200 bg-slate-50/50 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg transition-colors">Close</button>
+          <button onClick={save} disabled={saving} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#6800FF] hover:bg-[#5800DD] disabled:opacity-50 rounded-lg transition-colors">
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Save DNC List
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

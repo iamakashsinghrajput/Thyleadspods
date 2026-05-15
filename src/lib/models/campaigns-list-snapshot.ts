@@ -16,6 +16,8 @@ const CampaignRowSchema = new Schema({
   totalCount: { type: Number, default: 0 },
   uniqueOpenCount: { type: Number, default: 0 },
   uniqueClickCount: { type: Number, default: 0 },
+  uniqueReplyCount: { type: Number, default: 0 },
+  positiveReplyCount: { type: Number, default: 0 },
 }, { _id: false });
 
 const SnapshotSchema = new Schema({

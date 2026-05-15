@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, Fragment } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useData } from "@/lib/data-context";
-import { LogOut, Calendar, CheckCircle2, MessageSquare, X, Mail, Phone, User, Users, Building2, Globe, Video, Loader2, Search, Send, Reply, AlertTriangle, MailX, ChevronRight, ChevronDown, Sparkles, Lock, KeyRound, LayoutDashboard, Megaphone } from "lucide-react";
+import { LogOut, Calendar, CheckCircle2, MessageSquare, X, Mail, Phone, User, Users, Building2, Globe, Video, Loader2, Search, Send, Reply, AlertTriangle, MailX, ChevronRight, Sparkles, Lock, KeyRound, LayoutDashboard, Megaphone } from "lucide-react";
 import type { ClientDetail } from "@/lib/client-data";
 
 interface RemarkData {
@@ -324,11 +324,21 @@ export default function ClientPortal() {
         )}
 
         {activeTab === "dashboard" && (
-          <DashboardView
-            meetings={meetings}
-            upcomingMeetings={upcomingMeetings}
-            onOpen={openMeeting}
-          />
+          <div className="flex gap-6">
+            <div className="flex-1 min-w-0">
+              <DashboardView
+                meetings={meetings}
+                upcomingMeetings={upcomingMeetings}
+                onOpen={openMeeting}
+              />
+            </div>
+            <aside className="hidden xl:block w-80 shrink-0">
+              <div className="sticky top-4 space-y-5">
+                <PortalUpcomingCard meetings={upcomingMeetings} onOpen={openMeeting} />
+                <PortalRecentActivityCard meetings={meetings} onOpen={openMeeting} />
+              </div>
+            </aside>
+          </div>
         )}
 
         {activeTab === "accounts" && (
@@ -1037,7 +1047,6 @@ function DetailHeader({ name, status, onBack }: { name: string; status?: string;
 
 function DashboardView({
   meetings,
-  upcomingMeetings,
   onOpen,
 }: {
   meetings: ClientDetail[];
@@ -1054,15 +1063,6 @@ function DashboardView({
   const thisMonthCount = meetings.filter((m) => m.month === currentMonth && m.year === currentYear).length;
   const doneCount = meetings.filter((m) => m.meetingStatus === "done").length;
   const scheduledCount = meetings.filter((m) => m.meetingStatus === "scheduled").length;
-  const pipelineCount = meetings.filter((m) => m.meetingStatus === "pipeline").length;
-
-  const upcoming = upcomingMeetings.slice(0, 5);
-
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const recent = [...meetings]
-    .filter((m) => m.meetingDate && m.meetingDate <= todayStr)
-    .sort((a, b) => (b.meetingDate || "").localeCompare(a.meetingDate || ""))
-    .slice(0, 5);
 
   const monthOptions = Array.from(new Set(meetings
     .filter((m) => m.month && m.year)
@@ -1099,76 +1099,13 @@ function DashboardView({
 
   return (
     <>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <StatTile label="This Month" value={thisMonthCount} sub={`${currentMonth} ${currentYear}`}
-          active={statusFilter === "thisMonth"} onClick={() => setStatusFilter((p) => p === "thisMonth" ? "all" : "thisMonth")} />
-        <StatTile label="Completed" value={doneCount} sub="All time" accent="emerald"
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <StatTile label="Total Completed" value={doneCount} sub="All time" accent="emerald"
           active={statusFilter === "done"} onClick={() => setStatusFilter((p) => p === "done" ? "all" : "done")} />
         <StatTile label="Scheduled" value={scheduledCount} sub="Upcoming" accent="amber"
           active={statusFilter === "scheduled"} onClick={() => setStatusFilter((p) => p === "scheduled" ? "all" : "scheduled")} />
-        <StatTile label="Pipeline" value={pipelineCount} sub="In progress" accent="indigo"
-          active={statusFilter === "pipeline"} onClick={() => setStatusFilter((p) => p === "pipeline" ? "all" : "pipeline")} />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <section>
-          <h2 className="text-base font-bold text-slate-900 mb-3">Recent Activity</h2>
-          {recent.length === 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-white px-5 py-6 text-sm text-slate-500">
-              No recent meeting activity yet.
-            </div>
-          ) : (
-            <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-              <ul className="divide-y divide-slate-100">
-                {recent.map((m) => (
-                  <li key={m.meetingId}>
-                    <button
-                      onClick={() => onOpen(m)}
-                      className="w-full text-left px-4 py-3 hover:bg-slate-50/60 transition-colors flex items-center gap-3"
-                    >
-                      <span className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${
-                        m.meetingStatus === "done" ? "bg-emerald-50 text-emerald-600" :
-                        m.meetingStatus === "scheduled" ? "bg-amber-50 text-amber-600" :
-                        "bg-indigo-50 text-indigo-600"
-                      }`}>
-                        {m.meetingStatus === "done" ? <CheckCircle2 size={14} /> : <Calendar size={14} />}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[13px] font-semibold text-slate-900 truncate">
-                          <span className="text-slate-500 font-normal">Meeting with </span>{m.companyName || "—"}
-                        </p>
-                        <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                          {m.contactName || "—"}
-                          {m.contactTitle && <span className="text-slate-400"> · {m.contactTitle}</span>}
-                        </p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-[11px] font-semibold text-slate-600 tabular-nums">{m.meetingDate || "—"}</p>
-                        <p className="text-[10px] text-slate-400 mt-0.5 capitalize">{m.meetingStatus}</p>
-                      </div>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </section>
-
-        <section>
-          <h2 className="text-base font-bold text-slate-900 mb-3">Upcoming Meetings</h2>
-          {upcoming.length === 0 ? (
-            <div className="rounded-xl border border-slate-200 bg-white px-5 py-6 text-sm text-slate-500 flex items-center gap-3">
-              <Calendar size={16} className="text-slate-400" />
-              No upcoming meetings scheduled.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {upcoming.map((m) => (
-                <MeetingCard key={m.meetingId} m={m} onClick={() => onOpen(m)} />
-              ))}
-            </div>
-          )}
-        </section>
+        <StatTile label="Current Month" value={thisMonthCount} sub={`${currentMonth} ${currentYear}`} accent="indigo"
+          active={statusFilter === "thisMonth"} onClick={() => setStatusFilter((p) => p === "thisMonth" ? "all" : "thisMonth")} />
       </div>
 
       <section className="mb-6">
@@ -1184,10 +1121,9 @@ function DashboardView({
             className="px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-[#6800FF]"
           >
             <option value="all">All statuses</option>
-            <option value="scheduled">Scheduled</option>
             <option value="done">Completed</option>
+            <option value="scheduled">Scheduled</option>
             <option value="pipeline">Pipeline</option>
-            <option value="thisMonth">This month</option>
           </select>
           <select
             value={monthFilter}
@@ -1305,30 +1241,114 @@ function DashboardView({
   );
 }
 
-function MeetingCard({ m, onClick }: { m: ClientDetail; onClick: () => void }) {
-  const style = statusStyle[m.meetingStatus] || statusStyle.pipeline;
+function PortalUpcomingCard({ meetings, onOpen }: { meetings: ClientDetail[]; onOpen: (m: ClientDetail) => void }) {
+  const upcoming = meetings.slice(0, 5);
   return (
-    <button
-      onClick={onClick}
-      className="w-full text-left bg-white border border-slate-200 hover:border-[#6800FF]/40 hover:shadow-sm rounded-xl px-4 py-3 transition-all"
-    >
-      <p className="text-[13.5px] font-semibold text-slate-900 truncate">{m.companyName || "—"}</p>
-      <p className="text-[11px] text-slate-500 mt-1 truncate">
-        {m.contactName || "—"}
-        {m.contactTitle && <span className="text-slate-400"> · {m.contactTitle}</span>}
-      </p>
-      <div className="flex items-center gap-2 mt-2 text-[11px]">
-        <span className="text-slate-600 tabular-nums">{m.meetingDate || "—"}</span>
-        {m.meetingTime && <span className="text-slate-400">· {m.meetingTime}</span>}
-        <span className={`inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded ml-auto ${style.bg} ${style.text}`}>
-          {style.label}
-        </span>
+    <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="w-6 h-6 rounded-md bg-amber-50 text-amber-600 flex items-center justify-center">
+            <Calendar size={12} />
+          </span>
+          <h3 className="text-[13px] font-bold text-slate-900">Upcoming Meetings</h3>
+        </div>
+        <span className="text-[10.5px] tabular-nums text-slate-500">{upcoming.length}</span>
       </div>
-    </button>
+      {upcoming.length === 0 ? (
+        <div className="px-4 py-6 text-[12px] text-slate-500 flex items-center gap-2">
+          <Calendar size={14} className="text-slate-400" /> No upcoming meetings scheduled.
+        </div>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {upcoming.map((m) => {
+            const dayName = m.meetingDate ? (() => {
+              const t = new Date();
+              const tStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+              if (m.meetingDate === tStr) return "Today";
+              const tmr = new Date(); tmr.setDate(tmr.getDate() + 1);
+              const tmrStr = `${tmr.getFullYear()}-${String(tmr.getMonth() + 1).padStart(2, "0")}-${String(tmr.getDate()).padStart(2, "0")}`;
+              if (m.meetingDate === tmrStr) return "Tomorrow";
+              const d = new Date(`${m.meetingDate}T00:00:00`);
+              return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { weekday: "short" });
+            })() : "";
+            const dayNum = m.meetingDate ? new Date(`${m.meetingDate}T00:00:00`).getDate() : "";
+            return (
+              <li key={m.meetingId}>
+                <button
+                  onClick={() => onOpen(m)}
+                  className="w-full text-left px-4 py-3 hover:bg-slate-50/70 transition-colors flex items-start gap-3"
+                >
+                  <div className="shrink-0 w-11 h-11 rounded-lg bg-[#f0e6ff] border border-[#6800FF]/15 flex flex-col items-center justify-center">
+                    <span className="text-[8.5px] font-bold uppercase tracking-wider text-[#6800FF] leading-none">{dayName}</span>
+                    <span className="text-[14px] font-bold tabular-nums text-[#6800FF] leading-tight mt-0.5">{dayNum}</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12.5px] font-semibold text-slate-900 truncate">{m.companyName || "Untitled meeting"}</p>
+                    <p className="text-[11px] text-slate-500 truncate mt-0.5">
+                      {m.contactName || "—"}
+                      {m.contactTitle && <span className="text-slate-400"> · {m.contactTitle}</span>}
+                    </p>
+                    <p className="text-[10.5px] text-slate-400 mt-0.5 tabular-nums">{m.meetingTime || "Time TBD"}</p>
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 
-
+function PortalRecentActivityCard({ meetings, onOpen }: { meetings: ClientDetail[]; onOpen: (m: ClientDetail) => void }) {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const recent = [...meetings]
+    .filter((m) => m.meetingDate && m.meetingDate <= todayStr)
+    .sort((a, b) => (b.meetingDate || "").localeCompare(a.meetingDate || ""))
+    .slice(0, 6);
+  return (
+    <section className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="w-6 h-6 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <CheckCircle2 size={12} />
+          </span>
+          <h3 className="text-[13px] font-bold text-slate-900">Recent Activity</h3>
+        </div>
+        <span className="text-[10.5px] tabular-nums text-slate-500">{recent.length}</span>
+      </div>
+      {recent.length === 0 ? (
+        <div className="px-4 py-6 text-[12px] text-slate-500">No recent meeting activity yet.</div>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {recent.map((m) => {
+            const dot = m.meetingStatus === "done" ? "bg-emerald-500" : m.meetingStatus === "scheduled" ? "bg-amber-500" : "bg-indigo-500";
+            const label = m.meetingStatus === "done" ? "Done" : m.meetingStatus === "scheduled" ? "Scheduled" : "Pipeline";
+            const labelClass = m.meetingStatus === "done" ? "bg-emerald-50 text-emerald-700" : m.meetingStatus === "scheduled" ? "bg-amber-50 text-amber-700" : "bg-indigo-50 text-indigo-700";
+            return (
+              <li key={m.meetingId}>
+                <button
+                  onClick={() => onOpen(m)}
+                  className="w-full text-left px-4 py-3 hover:bg-slate-50/70 transition-colors flex items-start gap-2.5"
+                >
+                  <span className={`shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full ${dot}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12.5px] font-semibold text-slate-900 truncate">{m.companyName || "Untitled"}</p>
+                    <p className="text-[11px] text-slate-500 truncate">{m.contactName || "—"}</p>
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9.5px] font-bold ${labelClass}`}>{label}</span>
+                      <span className="text-[10px] text-slate-400 tabular-nums">{m.meetingDate || "—"}</span>
+                    </div>
+                  </div>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 function ColHeader({ icon, label, last }: { icon: React.ReactNode; label: string; last?: boolean }) {
   return (
@@ -1459,24 +1479,20 @@ type ClientAccountGroup = {
 
 function AccountsSection({ groups, loading, error }: { groups: ClientAccountGroup[]; loading: boolean; error: string }) {
   const [search, setSearch] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const filtered = groups.filter((g) => {
+  const flatRows = (() => {
+    const out: { domain: string; company: string; rootKey: string }[] = [];
+    for (const g of groups) {
+      for (const d of g.domains) out.push({ domain: d.domain, company: d.company || g.company || "", rootKey: g.rootKey });
+    }
+    return out;
+  })();
+
+  const filtered = flatRows.filter((r) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    if (g.displayDomain.includes(q)) return true;
-    if (g.rootKey.includes(q)) return true;
-    if (g.company.toLowerCase().includes(q)) return true;
-    return g.domains.some((d) => d.domain.includes(q) || d.company.toLowerCase().includes(q));
+    return r.domain.includes(q) || r.company.toLowerCase().includes(q) || r.rootKey.includes(q);
   });
-
-  function toggle(rk: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(rk)) next.delete(rk); else next.add(rk);
-      return next;
-    });
-  }
 
   return (
     <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col" style={{ height: "calc(100vh - 140px)" }}>
@@ -1489,8 +1505,8 @@ function AccountsSection({ groups, loading, error }: { groups: ClientAccountGrou
             <h2 className="text-[13px] font-bold uppercase tracking-wider text-slate-700">Target Account List</h2>
             <p className="text-[11px] text-slate-500">
               Showing <span className="font-semibold text-slate-700">{filtered.length.toLocaleString()}</span>
-              {search.trim() && <> of <span className="font-semibold text-slate-700">{groups.length.toLocaleString()}</span></>}
-              <span> {filtered.length === 1 ? "domain" : "domains"}</span>
+              {search.trim() && <> of <span className="font-semibold text-slate-700">{flatRows.length.toLocaleString()}</span></>}
+              <span> {filtered.length === 1 ? "row" : "rows"}</span>
             </p>
           </div>
         </div>
@@ -1505,91 +1521,45 @@ function AccountsSection({ groups, loading, error }: { groups: ClientAccountGrou
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-auto">
-        {loading ? (
-          <div className="flex items-center justify-center py-20 text-sm text-slate-400">
-            <Loader2 size={14} className="animate-spin mr-2" /> Loading accounts…
-          </div>
-        ) : error ? (
-          <div className="m-4 p-4 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-lg">{error}</div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-16 text-sm text-slate-400">
-            <Building2 size={22} className="text-slate-300 mx-auto mb-2" />
-            {groups.length > 0 ? "No matches for your search." : "No accounts available yet."}
-          </div>
-        ) : (
-          <table className="w-full border-separate border-spacing-0">
-            <thead className="sticky top-0 z-10">
-              <tr className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                <th className="text-left px-4 py-2.5 w-16 bg-slate-50 border-b border-slate-200">S.No</th>
-                <th className="text-left px-4 py-2.5 w-12 bg-slate-50 border-b border-slate-200"></th>
-                <th className="text-left px-4 py-2.5 bg-slate-50 border-b border-slate-200">Domain</th>
-                <th className="text-left px-4 py-2.5 bg-slate-50 border-b border-slate-200">Company</th>
-                <th className="text-right px-4 py-2.5 w-36 bg-slate-50 border-b border-slate-200">Sub-domains</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((g, i) => {
-                const subCount = g.domains.length;
-                const expandable = subCount > 1;
-                const isOpen = expandable && expanded.has(g.rootKey);
-                const cellBase = "px-4 py-3 border-b border-slate-100";
-                return (
-                  <Fragment key={g.rootKey}>
-                    <tr
-                      onClick={() => expandable && toggle(g.rootKey)}
-                      className={`hover:bg-slate-50/70 transition-colors ${expandable ? "cursor-pointer" : ""}`}
-                    >
-                      <td className={`${cellBase} w-16 text-[12px] text-slate-500 tabular-nums`}>{i + 1}</td>
-                      <td className={`${cellBase} w-12`}>
-                        {expandable ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); toggle(g.rootKey); }}
-                            className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-[#6800FF] hover:bg-[#f0e6ff] transition-colors"
-                            title={isOpen ? "Collapse" : "Expand"}
-                          >
-                            {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          </button>
-                        ) : (
-                          <span className="w-6 h-6 inline-block" />
-                        )}
-                      </td>
-                      <td className={cellBase}>
-                        <span className="text-[13px] font-semibold text-slate-900">{g.displayDomain}</span>
-                      </td>
-                      <td className={`${cellBase} text-[12.5px] text-slate-700`}>{g.company || <span className="text-slate-300">—</span>}</td>
-                      <td className={`${cellBase} text-right w-36`}>
-                        <span className={`inline-flex items-center justify-center min-w-[28px] h-[20px] px-2 text-[11px] font-bold rounded-full ${subCount > 1 ? "bg-[#f0e6ff] text-[#6800FF]" : "bg-slate-100 text-slate-500"}`}>
-                          {subCount}
-                        </span>
-                      </td>
-                    </tr>
-                    {isOpen && (
-                      <tr className="bg-slate-50/60">
-                        <td colSpan={5} className="px-4 pt-2 pb-3 border-b border-slate-100">
-                          <div className="ml-[6.5rem] border-l-2 border-[#6800FF]/20 pl-4">
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Sub-domains</p>
-                            <ul className="space-y-1">
-                              {g.domains.map((d) => (
-                                <li key={d.domain} className="flex items-center gap-2 text-[12.5px]">
-                                  <span className="w-1 h-1 rounded-full bg-slate-300 shrink-0" />
-                                  <span className="font-mono text-slate-700">{d.domain}</span>
-                                  {d.company && d.company !== g.company && (
-                                    <span className="text-[11px] text-slate-500">· {d.company}</span>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+      <div className="flex-1 min-h-0 m-3 rounded-lg border border-slate-300 bg-white overflow-hidden flex flex-col">
+        <div className="flex-1 min-h-0 overflow-auto">
+          {loading ? (
+            <div className="flex items-center justify-center py-20 text-sm text-slate-400">
+              <Loader2 size={14} className="animate-spin mr-2" /> Loading accounts…
+            </div>
+          ) : error ? (
+            <div className="m-4 p-4 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-lg">{error}</div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-16 text-sm text-slate-400">
+              <Building2 size={22} className="text-slate-300 mx-auto mb-2" />
+              {flatRows.length > 0 ? "No matches for your search." : "No accounts available yet."}
+            </div>
+          ) : (
+            <table className="border-collapse text-[12.5px]" style={{ minWidth: "100%" }}>
+              <thead>
+                <tr className="sticky top-0 z-20 bg-[#f1f3f4] text-slate-600">
+                  <th className="sticky left-0 z-30 bg-[#f1f3f4] w-12 h-7 px-2 border-b border-r border-slate-300 text-[10.5px] font-semibold"></th>
+                  <th className="h-7 px-3 border-b border-r border-slate-300 text-[10.5px] font-semibold text-center min-w-30">A</th>
+                  <th className="h-7 px-3 border-b border-r border-slate-300 text-[10.5px] font-semibold text-center min-w-30">B</th>
+                </tr>
+                <tr className="sticky top-7 z-20 bg-white text-slate-700">
+                  <th className="sticky left-0 z-30 bg-[#f8f9fa] w-12 h-9 px-2 border-b border-r border-slate-300 text-[10.5px] font-bold text-center">1</th>
+                  <th className="h-9 px-3 border-b border-r border-slate-300 text-left text-[11.5px] font-semibold min-w-65">Domain</th>
+                  <th className="h-9 px-3 border-b border-r border-slate-300 text-left text-[11.5px] font-semibold min-w-80">Company</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r, i) => (
+                  <tr key={`${r.domain}-${i}`} className="hover:bg-[#f0fbff]">
+                    <td className="sticky left-0 z-10 bg-[#f8f9fa] w-12 h-8 px-2 border-b border-r border-slate-200 text-[10.5px] font-semibold text-slate-500 text-center tabular-nums">{i + 2}</td>
+                    <td className="h-8 px-3 border-b border-r border-slate-200 text-slate-900 font-medium">{r.domain}</td>
+                    <td className="h-8 px-3 border-b border-r border-slate-200 text-slate-700 truncate max-w-md">{r.company || <span className="text-slate-300">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </section>
   );

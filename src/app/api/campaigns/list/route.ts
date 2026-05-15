@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/mongodb";
 import UserModel from "@/lib/models/user";
 import { SUPERADMIN_EMAIL } from "@/lib/user-approval";
 import CampaignsListSnapshot from "@/lib/models/campaigns-list-snapshot";
-import { fetchAllCampaigns, fetchCampaignAnalytics, mapLimited } from "@/lib/smartlead";
+import { fetchAllCampaigns, fetchCampaignAnalytics, getCampaignReplyMetrics, mapLimited } from "@/lib/smartlead";
 
 const STALE_MS = 5 * 60_000;
 const REFRESH_LOCK_TIMEOUT_MS = 2 * 60_000;
@@ -31,6 +31,8 @@ type Row = {
   totalCount: number;
   uniqueOpenCount: number;
   uniqueClickCount: number;
+  uniqueReplyCount: number;
+  positiveReplyCount: number;
 };
 
 async function buildFreshSnapshot(): Promise<{ campaigns: Row[]; counts: Record<string, number> }> {
@@ -38,7 +40,10 @@ async function buildFreshSnapshot(): Promise<{ campaigns: Row[]; counts: Record<
   const rows = await mapLimited(campaigns, async (c) => {
     const id = c.id;
     if (id === undefined) return null;
-    const stats = await fetchCampaignAnalytics(String(id)).catch(() => null);
+    const [stats, replyMetrics] = await Promise.all([
+      fetchCampaignAnalytics(String(id)).catch(() => null),
+      getCampaignReplyMetrics(String(id)).catch(() => ({ uniqueReplyCount: 0, positiveReplyCount: 0 })),
+    ]);
     return {
       id,
       name: c.name || `Campaign ${id}`,
@@ -53,6 +58,8 @@ async function buildFreshSnapshot(): Promise<{ campaigns: Row[]; counts: Record<
       totalCount: stats?.total_count || 0,
       uniqueOpenCount: stats?.unique_open_count || 0,
       uniqueClickCount: stats?.unique_click_count || 0,
+      uniqueReplyCount: replyMetrics.uniqueReplyCount || 0,
+      positiveReplyCount: replyMetrics.positiveReplyCount || 0,
     } as Row;
   });
   const filtered = rows.filter((r): r is Row => r !== null);

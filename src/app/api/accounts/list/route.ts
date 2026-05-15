@@ -42,7 +42,7 @@ function pickDisplayDomain(domains: string[]): string {
 export async function GET(req: NextRequest) {
   const actor = req.nextUrl.searchParams.get("actor") || "";
   const role = await actorRole(actor);
-  if (role !== "superadmin" && role !== "admin") {
+  if (role !== "superadmin" && role !== "admin" && role !== "pod") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const projectId = (req.nextUrl.searchParams.get("projectId") || "").trim();

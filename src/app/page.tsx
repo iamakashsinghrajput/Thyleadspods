@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { usePods } from "@/lib/pod-context";
@@ -18,13 +18,9 @@ export default function Dashboard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryAs = searchParams.get("as") || "";
-  const [viewAsMember, setViewAsMember] = useState<string | null>(queryAs || null);
+  const viewAsMember = queryAs || null;
   const [selectedMonth, setSelectedMonth] = useState<string>(() => new Date().toLocaleString("en-US", { month: "long" }));
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-
-  useEffect(() => {
-    setViewAsMember(queryAs || null);
-  }, [queryAs]);
 
   const allMembers = useMemo(() => {
     const m = new Map<string, { firstName: string; podName: string }>();
@@ -59,7 +55,6 @@ export default function Dashboard() {
   }
 
   function impersonate(firstName: string | null) {
-    setViewAsMember(firstName);
     if (firstName) {
       router.replace(`/?as=${encodeURIComponent(firstName)}`);
     } else {
