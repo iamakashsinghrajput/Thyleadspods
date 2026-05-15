@@ -6,6 +6,8 @@ import AccountsSheet from "@/lib/models/accounts-sheet";
 import { SUPERADMIN_EMAIL } from "@/lib/user-approval";
 import { normalizeDomain, rootKeyFor } from "@/lib/accounts-domain";
 import { migrateLegacyGlobalSheet } from "@/lib/accounts-migrate";
+import { syncFromGoogleSheet, recordSyncError } from "@/lib/accounts-sync";
+import { isApiKeyConfigured } from "@/lib/google-sheets";
 
 async function actorRole(email: string): Promise<string> {
   const e = (email || "").toLowerCase().trim();
@@ -55,7 +57,20 @@ export async function GET(req: NextRequest) {
   }
   await migrateLegacyGlobalSheet();
 
-  const snapshot = await AccountsSheet.findOne({ projectId }).lean<{
+  type GoogleSheetMeta = {
+    sheetUrl?: string;
+    spreadsheetId?: string;
+    tabTitle?: string;
+    tabSheetId?: number | null;
+    connectedAt?: Date | null;
+    connectedBy?: string;
+    lastSyncAt?: Date | null;
+    lastSyncError?: string;
+    domainColumn?: string;
+    companyColumn?: string;
+  };
+
+  let snapshot = await AccountsSheet.findOne({ projectId }).lean<{
     rows?: StoredRow[];
     totals?: { uploaded: number; dnc: number; net: number; uniqueDomains: number };
     manualDnc?: string[];
@@ -64,7 +79,30 @@ export async function GET(req: NextRequest) {
     originalFileName?: string;
     uploadedBy?: string;
     updatedAt?: Date | null;
+    source?: string;
+    googleSheet?: GoogleSheetMeta;
   }>();
+
+  let syncedNow = false;
+  let syncError = "";
+  const gs = snapshot?.googleSheet;
+  if (gs?.spreadsheetId && gs.tabTitle && isApiKeyConfigured()) {
+    try {
+      await syncFromGoogleSheet({
+        projectId,
+        spreadsheetId: gs.spreadsheetId,
+        tabTitle: gs.tabTitle,
+        tabSheetId: gs.tabSheetId ?? null,
+        sheetUrl: gs.sheetUrl,
+        actor,
+      });
+      syncedNow = true;
+      snapshot = await AccountsSheet.findOne({ projectId }).lean<typeof snapshot>();
+    } catch (e) {
+      syncError = e instanceof Error ? e.message : "Sync failed";
+      await recordSyncError(projectId, syncError);
+    }
+  }
 
   if (!snapshot) {
     return NextResponse.json({
@@ -77,6 +115,10 @@ export async function GET(req: NextRequest) {
       originalFileName: "",
       uploadedBy: "",
       updatedAt: null,
+      source: "none",
+      googleSheet: null,
+      syncedNow: false,
+      syncError: "",
     });
   }
 
@@ -128,6 +170,21 @@ export async function GET(req: NextRequest) {
   const net = surviving.length;
   const uniqueDomains = groups.length;
 
+  const gsOut = snapshot.googleSheet?.spreadsheetId
+    ? {
+        sheetUrl: snapshot.googleSheet.sheetUrl || "",
+        spreadsheetId: snapshot.googleSheet.spreadsheetId,
+        tabTitle: snapshot.googleSheet.tabTitle || "",
+        tabSheetId: snapshot.googleSheet.tabSheetId ?? null,
+        connectedAt: snapshot.googleSheet.connectedAt?.toISOString?.() || null,
+        connectedBy: snapshot.googleSheet.connectedBy || "",
+        lastSyncAt: snapshot.googleSheet.lastSyncAt?.toISOString?.() || null,
+        lastSyncError: snapshot.googleSheet.lastSyncError || "",
+        domainColumn: snapshot.googleSheet.domainColumn || "",
+        companyColumn: snapshot.googleSheet.companyColumn || "",
+      }
+    : null;
+
   return NextResponse.json({
     projectId,
     clientName: project.clientName || "",
@@ -147,5 +204,9 @@ export async function GET(req: NextRequest) {
     originalFileName: snapshot.originalFileName || "",
     uploadedBy: snapshot.uploadedBy || "",
     updatedAt: snapshot.updatedAt?.toISOString?.() || null,
+    source: snapshot.source || "upload",
+    googleSheet: gsOut,
+    syncedNow,
+    syncError,
   });
 }

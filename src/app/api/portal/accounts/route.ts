@@ -3,6 +3,8 @@ import { connectDB } from "@/lib/mongodb";
 import AccountsSheet from "@/lib/models/accounts-sheet";
 import { normalizeDomain, rootKeyFor } from "@/lib/accounts-domain";
 import { migrateLegacyGlobalSheet } from "@/lib/accounts-migrate";
+import { syncFromGoogleSheet, recordSyncError } from "@/lib/accounts-sync";
+import { isApiKeyConfigured } from "@/lib/google-sheets";
 
 type StoredRow = { domain: string; company: string; dnc: boolean; rootKey: string };
 
@@ -34,11 +36,35 @@ export async function GET(req: NextRequest) {
   await connectDB();
   await migrateLegacyGlobalSheet();
 
-  const snapshot = await AccountsSheet.findOne({ projectId }).lean<{
+  type GoogleSheetMeta = {
+    spreadsheetId?: string;
+    tabTitle?: string;
+    tabSheetId?: number | null;
+    sheetUrl?: string;
+  };
+
+  let snapshot = await AccountsSheet.findOne({ projectId }).lean<{
     rows?: StoredRow[];
     manualDnc?: string[];
     updatedAt?: Date | null;
+    googleSheet?: GoogleSheetMeta;
   }>();
+
+  const gs = snapshot?.googleSheet;
+  if (gs?.spreadsheetId && gs.tabTitle && isApiKeyConfigured()) {
+    try {
+      await syncFromGoogleSheet({
+        projectId,
+        spreadsheetId: gs.spreadsheetId,
+        tabTitle: gs.tabTitle,
+        tabSheetId: gs.tabSheetId ?? null,
+        sheetUrl: gs.sheetUrl,
+      });
+      snapshot = await AccountsSheet.findOne({ projectId }).lean<typeof snapshot>();
+    } catch (e) {
+      await recordSyncError(projectId, e instanceof Error ? e.message : "Sync failed");
+    }
+  }
 
   if (!snapshot) {
     return NextResponse.json({ groups: [], total: 0, updatedAt: null });

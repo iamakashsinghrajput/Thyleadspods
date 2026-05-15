@@ -23,6 +23,19 @@ const SheetSchema = new Schema({
   manualDncUpdatedBy: { type: String, default: "" },
   originalFileName: { type: String, default: "" },
   uploadedBy: { type: String, default: "" },
+  source: { type: String, default: "upload" },
+  googleSheet: {
+    sheetUrl: { type: String, default: "" },
+    spreadsheetId: { type: String, default: "" },
+    tabTitle: { type: String, default: "" },
+    tabSheetId: { type: Number, default: null },
+    connectedAt: { type: Date, default: null },
+    connectedBy: { type: String, default: "" },
+    lastSyncAt: { type: Date, default: null },
+    lastSyncError: { type: String, default: "" },
+    domainColumn: { type: String, default: "" },
+    companyColumn: { type: String, default: "" },
+  },
   updatedAt: { type: Date, default: null },
 }, { strict: false, timestamps: true });
 
