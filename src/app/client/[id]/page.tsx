@@ -2,7 +2,7 @@
 
 import { use, useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Search, X, Upload, Pickaxe, Plus, Pencil, Check, Download, Calendar, Megaphone, Building2, Loader2, UploadCloud, Link2, Ban, CheckCircle2, AlertTriangle, Save, ListX, RefreshCw } from "lucide-react";
+import { ArrowLeft, Search, X, Plus, Pencil, Check, Download, Calendar, Megaphone, Building2, Loader2, UploadCloud, Link2, Ban, CheckCircle2, AlertTriangle, Save, ListX, RefreshCw, ChevronDown } from "lucide-react";
 import { useData } from "@/lib/data-context";
 import { useAuth } from "@/lib/auth-context";
 import { useNotifications } from "@/lib/notification-context";
@@ -39,13 +39,6 @@ const contactCols = [
   { label: "Contact Number", short: "Phone", bp: 120, w: 150 },
 ];
 
-const metricCols = [
-  { label: "Date", short: "Date", bp: 80, w: 220 },
-  { label: "Leads Uploaded", short: "Leads", bp: 120, w: 220 },
-  { label: "Accounts Mined", short: "Accounts", bp: 130, w: 220 },
-  { label: "Daily Total", short: "Total", bp: 100, w: 220 },
-];
-
 function useResizableCols(defaults: number[]) {
   const [widths, setWidths] = useState(defaults);
   const dragRef = useRef<{ i: number; startX: number; startW: number } | null>(null);
@@ -79,13 +72,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const router = useRouter();
   const { user } = useAuth();
   const { pods, podMap } = usePods();
-  const { projects, details, addDetail, updateDetail, deleteDetail, metrics, addMetric, updateMetric, deleteMetric, updateProject } = useData();
+  const { projects, details, addDetail, updateDetail, deleteDetail, updateProject } = useData();
   const { addNotification } = useNotifications();
 
   const isPod = user?.role === "pod" || user?.role === "superadmin";
   const isAdmin = user?.role === "admin" || user?.role === "superadmin";
   const contactResize = useResizableCols(contactCols.map((c) => c.w));
-  const metricResize = useResizableCols(metricCols.map((c) => c.w));
   const project = projects.find((p) => p.id === id);
   const records = useMemo(() => details[id] ?? [], [details, id]);
   const clientName = project?.clientName ?? records[0]?.clientName ?? "Unknown Client";
@@ -190,18 +182,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     })();
     return () => { ignore = true; };
   }, [id]);
-
-  const metricsData = metrics[id] ?? [];
-  const metricsMonths = [...new Set(metricsData.map((m) => `${m.month} ${m.year}`))];
-  const [selectedMetricsMonth, setSelectedMetricsMonth] = useState(metricsMonths[0] ?? "");
-  const activeMetrics = metricsData.find((m) => `${m.month} ${m.year}` === selectedMetricsMonth);
-  const dailyRows = activeMetrics?.dailyMetrics ?? [];
-  const totalLeads = dailyRows.reduce((s, d) => s + d.leadsUploaded, 0);
-  const totalAccounts = dailyRows.reduce((s, d) => s + d.accountsMined, 0);
-
-  const [showMetricForm, setShowMetricForm] = useState(false);
-  const [editingMetricDate, setEditingMetricDate] = useState<string | null>(null);
-  const [metricForm, setMetricForm] = useState({ date: "", leadsUploaded: "", accountsMined: "" });
 
   const filtered = useMemo(() => {
     return records.filter((r) => {
@@ -317,32 +297,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     if (isPod) addNotification(`${podLabel} deleted a contact for ${clientName} (${d.contactName})`, "admin");
   }
 
-  function resetMetricForm() {
-    setMetricForm({ date: "", leadsUploaded: "", accountsMined: "" });
-    setShowMetricForm(false);
-    setEditingMetricDate(null);
-  }
-
-  function handleSaveMetric() {
-    if (!activeMetrics) return;
-    const leads = Number(metricForm.leadsUploaded) || 0;
-    const accounts = Number(metricForm.accountsMined) || 0;
-    if (editingMetricDate) {
-      updateMetric(id, activeMetrics.month, activeMetrics.year, editingMetricDate, { date: metricForm.date, leadsUploaded: leads, accountsMined: accounts });
-      if (isPod) addNotification(`${podLabel} updated metrics for ${clientName} on ${metricForm.date}`, "admin");
-    } else {
-      addMetric(id, metricForm.date, activeMetrics.month, activeMetrics.year, leads, accounts);
-      if (isPod) addNotification(`${podLabel} added metrics for ${clientName} on ${metricForm.date} — Leads: ${leads}, Accounts: ${accounts}`, "admin");
-    }
-    resetMetricForm();
-  }
-
-  function handleDeleteMetric(date: string) {
-    if (!activeMetrics) return;
-    deleteMetric(id, activeMetrics.month, activeMetrics.year, date);
-    if (isPod) addNotification(`${podLabel} deleted metrics for ${clientName} on ${date}`, "admin");
-  }
-
   function escapeCsv(val: string) {
     if (!val) return "";
     if (val.includes(",") || val.includes('"') || val.includes("\n")) return '"' + val.replace(/"/g, '""') + '"';
@@ -366,15 +320,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       r.meetingId, r.month, String(r.year), r.clientName, r.geo, r.salesRep, r.accountManager || "", r.meetingDate, r.meetingTime, r.meetingStatus, r.meetingLink, r.companyName, r.contactName, r.contactTitle, r.contactEmail, r.contactNumber, r.remarks || "", r.additionalInfo || "", r.meetingSummary || "",
     ]);
     downloadCsv(`${clientName.replace(/\s+/g, "_")}_meetings.csv`, headers, rows);
-  }
-
-  function exportMetrics() {
-    if (!dailyRows.length) return;
-    const headers = ["Date", "Leads Uploaded", "Accounts Mined", "Daily Total"];
-    const rows = dailyRows.map((d) => [d.date, String(d.leadsUploaded), String(d.accountsMined), String(d.leadsUploaded + d.accountsMined)]);
-    rows.push(["Total", String(totalLeads), String(totalAccounts), String(totalLeads + totalAccounts)]);
-    const monthLabel = selectedMetricsMonth.replace(/\s+/g, "_");
-    downloadCsv(`${clientName.replace(/\s+/g, "_")}_metrics_${monthLabel}.csv`, headers, rows);
   }
 
   return (
@@ -409,7 +354,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               {([
                 { key: "meetings" as const, label: "Meeting Details", icon: Calendar, count: records.length },
                 { key: "campaigns" as const, label: "Campaign Details", icon: Megaphone, count: (project?.smartleadCampaignIds || []).length || undefined },
-                { key: "accounts" as const, label: "Lead Accounts", icon: Building2 },
+                { key: "accounts" as const, label: "Accounts", icon: Building2 },
               ]).map((t) => {
                 const Icon = t.icon;
                 const active = activeTab === t.key;
@@ -901,118 +846,6 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           <LeadAccountsSection projectId={project.id} clientName={clientName} actorEmail={user?.email || ""} />
         )}
 
-        {activeTab === "meetings" && (
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <h2 className="text-base font-semibold text-slate-800">Daily Metrics</h2>
-              {metricsMonths.length > 0 && (
-                <select value={selectedMetricsMonth} onChange={(e) => setSelectedMetricsMonth(e.target.value)} className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#6800FF]/20">
-                  {metricsMonths.map((m, i) => <option key={`mm-${i}`} value={m}>{m}</option>)}
-                </select>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {dailyRows.length > 0 && (
-                <button onClick={exportMetrics} className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium rounded-lg transition-colors">
-                  <Download size={14} /> Export CSV
-                </button>
-              )}
-              {isPod && !showMetricForm && activeMetrics && (
-                <button onClick={() => { resetMetricForm(); setShowMetricForm(true); }} className="flex items-center gap-1.5 px-3 py-1.5 bg-[#6800FF] hover:bg-[#5800DD] text-white text-sm font-medium rounded-lg transition-colors">
-                  <Plus size={14} /> Add
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-[#f0e6ff] border border-[#e0ccff]"><Upload size={16} className="text-[#6800FF]" /></div>
-              <div>
-                <p className="text-[11px] font-semibold text-slate-400 uppercase">Leads Uploaded</p>
-                <p className="text-xl font-bold text-slate-900 tabular-nums">{totalLeads}</p>
-              </div>
-            </div>
-            <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-4 flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-100"><Pickaxe size={16} className="text-emerald-600" /></div>
-              <div>
-                <p className="text-[11px] font-semibold text-slate-400 uppercase">Accounts Mined</p>
-                <p className="text-xl font-bold text-slate-900 tabular-nums">{totalAccounts}</p>
-              </div>
-            </div>
-          </div>
-
-          {showMetricForm && isPod && (
-            <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-5 mb-3 space-y-3">
-              <p className="text-sm font-semibold text-slate-700">{editingMetricDate ? "Edit Entry" : "New Entry"}</p>
-              <div className="grid grid-cols-3 gap-2.5">
-                <input type="date" value={metricForm.date} onChange={(e) => setMetricForm({ ...metricForm, date: e.target.value })} className={inputClass} />
-                <input type="number" placeholder="Leads Uploaded" value={metricForm.leadsUploaded} onChange={(e) => setMetricForm({ ...metricForm, leadsUploaded: e.target.value })} className={inputClass} />
-                <input type="number" placeholder="Accounts Mined" value={metricForm.accountsMined} onChange={(e) => setMetricForm({ ...metricForm, accountsMined: e.target.value })} className={inputClass} />
-              </div>
-              <div className="flex gap-2">
-                <button onClick={handleSaveMetric} className="flex items-center gap-1.5 px-4 py-2 bg-[#6800FF] hover:bg-[#5800DD] text-white text-sm font-medium rounded-lg transition-colors"><Check size={14} /> {editingMetricDate ? "Update" : "Save"}</button>
-                <button onClick={resetMetricForm} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg transition-colors">Cancel</button>
-              </div>
-            </div>
-          )}
-
-          <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-            <div className="overflow-auto max-h-[70vh]">
-              <table className="w-full text-sm text-left" style={{ tableLayout: "fixed", minWidth: metricResize.widths.reduce((a, b) => a + b, 0) + (isPod ? 80 : 0) }}>
-                <colgroup>
-                  {metricResize.widths.map((w, i) => <col key={i} style={{ width: w }} />)}
-                  {isPod && <col style={{ width: 80 }} />}
-                </colgroup>
-                <thead className="sticky top-0 z-10">
-                  <tr className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500 uppercase tracking-wider">
-                    {metricCols.map((col, i) => (
-                      <th key={i} title={col.label} className={`relative px-4 py-3 font-semibold overflow-hidden text-ellipsis whitespace-nowrap bg-slate-50 ${i > 0 ? "text-right" : ""}`}>
-                        {metricResize.widths[i] < col.bp ? col.short : col.label}
-                        <div onMouseDown={(e) => metricResize.onMouseDown(i, e)} className="absolute right-0 top-2 bottom-2 w-0.75 cursor-col-resize rounded-full bg-slate-200 hover:bg-[#5800DD] active:bg-[#6800FF] transition-colors" />
-                      </th>
-                    ))}
-                    {isPod && <th className="px-4 py-3 w-20"></th>}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {dailyRows.map((day) => (
-                    <tr key={day.date} className="hover:bg-slate-50/80 transition-colors group">
-                      <td className="px-4 py-2.5 text-slate-700 tabular-nums font-medium overflow-hidden truncate">{day.date}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-indigo-700 overflow-hidden truncate">{day.leadsUploaded}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-emerald-700 overflow-hidden truncate">{day.accountsMined}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums font-bold text-slate-900 overflow-hidden truncate">{day.leadsUploaded + day.accountsMined}</td>
-                      {isPod && (
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onClick={() => { setEditingMetricDate(day.date); setMetricForm({ date: day.date, leadsUploaded: String(day.leadsUploaded), accountsMined: String(day.accountsMined) }); setShowMetricForm(true); }} className="p-1.5 rounded-md text-slate-400 hover:text-[#6800FF] hover:bg-[#f0e6ff] transition-colors"><Pencil size={14} /></button>
-                            <ConfirmDelete onConfirm={() => handleDeleteMetric(day.date)} />
-                          </div>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                  {dailyRows.length === 0 && (
-                    <tr><td colSpan={metricCols.length + (isPod ? 1 : 0)} className="px-4 py-12 text-center text-slate-400">No metrics data</td></tr>
-                  )}
-                </tbody>
-                {dailyRows.length > 0 && (
-                  <tfoot>
-                    <tr className="bg-slate-50/60 border-t border-slate-200">
-                      <td className="px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase">Total</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums font-bold text-indigo-700">{totalLeads}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums font-bold text-emerald-700">{totalAccounts}</td>
-                      <td className="px-4 py-2.5 text-right tabular-nums font-bold text-slate-900">{totalLeads + totalAccounts}</td>
-                      {isPod && <td></td>}
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          </div>
-        </section>
-        )}
 
         </main>
       </div>
@@ -1318,10 +1151,12 @@ function LeadAccountsSection({ projectId, clientName, actorEmail }: { projectId:
   }, [flatRows, search]);
 
   return (
+    <div className="space-y-4">
+    <DailyGrowthPanel projectId={projectId} refreshKey={updatedAt} />
     <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/60 flex items-center justify-between gap-3 flex-wrap">
         <div className="min-w-0">
-          <h2 className="text-[14px] font-semibold text-slate-800">Lead Accounts</h2>
+          <h2 className="text-[14px] font-semibold text-slate-800">Accounts</h2>
           <p className="text-[11px] text-slate-500 mt-0.5">
             {flatRows.length.toLocaleString()} rows · {groups.length.toLocaleString()} unique domains for {clientName}
             {data?.googleSheet && (
@@ -1448,6 +1283,227 @@ function LeadAccountsSection({ projectId, clientName, actorEmail }: { projectId:
         />
       )}
     </section>
+    </div>
+  );
+}
+
+type DailyGrowthSeries = {
+  date: string;
+  totalRows: number;
+  uniqueDomains: number;
+  newRows: number;
+  newDomains: number;
+  newDomainsList: string[];
+  newRowsList: string[];
+  listAvailable?: boolean;
+  isFilled?: boolean;
+};
+
+function DailyGrowthPanel({ projectId, refreshKey }: { projectId: string; refreshKey: string | null }) {
+  const [series, setSeries] = useState<DailyGrowthSeries[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [days, setDays] = useState<7 | 14 | 30>(14);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const res = await fetch(`/api/portal/accounts/daily?projectId=${encodeURIComponent(projectId)}&days=${days}`, { cache: "no-store" });
+        const json = await res.json();
+        if (cancelled) return;
+        if (!res.ok) { setError(json.error || "Failed to load daily growth"); return; }
+        setSeries(json.series || []);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Network error");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, days, refreshKey]);
+
+  const today = series[series.length - 1];
+  const yesterday = series[series.length - 2];
+  const sumWindow = series.reduce((s, d) => s + d.newDomains, 0);
+  const maxDelta = Math.max(1, ...series.map((d) => d.newDomains));
+
+  return (
+    <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/60 flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5">
+          <span className="w-7 h-7 rounded-md bg-emerald-50 text-emerald-700 flex items-center justify-center">
+            <UploadCloud size={14} />
+          </span>
+          <div>
+            <h2 className="text-[14px] font-semibold text-slate-800">Daily Growth</h2>
+            <p className="text-[11px] text-slate-500">
+              New unique domains added since the previous day.
+            </p>
+          </div>
+        </div>
+        <div className="inline-flex items-center bg-slate-100 rounded-md p-0.5">
+          {([7, 14, 30] as const).map((d) => {
+            const active = days === d;
+            return (
+              <button
+                key={d}
+                onClick={() => setDays(d)}
+                className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
+                  active ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {d}d
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="px-4 py-3 grid grid-cols-3 gap-3 border-b border-slate-100">
+        <GrowthStat label="Added today"   value={today?.newDomains ?? 0} accent="violet" />
+        <GrowthStat label="Yesterday"     value={yesterday?.newDomains ?? 0} />
+        <GrowthStat label={`Last ${days}d`} value={sumWindow} accent="emerald" />
+      </div>
+
+      <div className="px-4 py-3">
+        {error ? (
+          <div className="p-3 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg">{error}</div>
+        ) : loading && series.length === 0 ? (
+          <div className="flex items-center justify-center py-6 text-xs text-slate-400">
+            <Loader2 size={12} className="animate-spin mr-1.5" /> Loading…
+          </div>
+        ) : series.length === 0 ? (
+          <p className="text-xs text-slate-400 py-4 text-center">No history yet. Upload or sync a sheet to start tracking daily growth.</p>
+        ) : (
+          <>
+            <div className="flex items-end gap-1 h-24 mb-2">
+              {series.map((d) => {
+                const h = Math.round((d.newDomains / maxDelta) * 100);
+                const isToday = d === today;
+                return (
+                  <div key={d.date} className="flex-1 min-w-0 flex flex-col items-center justify-end group">
+                    <div
+                      className={`w-full rounded-t transition-all ${
+                        d.newDomains === 0 ? "bg-slate-200" : isToday ? "bg-[#6800FF]" : "bg-violet-300 group-hover:bg-violet-400"
+                      }`}
+                      style={{ height: `${Math.max(4, h)}%` }}
+                      title={`${d.date} · +${d.newDomains} new (total ${d.uniqueDomains})`}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-7 gap-1 text-[9px] text-slate-400 tabular-nums text-center">
+              {series.filter((_, i, arr) => i === 0 || i === arr.length - 1 || i % Math.max(1, Math.floor(arr.length / 6)) === 0).slice(0, 7).map((d) => (
+                <span key={d.date}>{d.date.slice(5)}</span>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+
+      <NewEntriesList series={series} />
+    </section>
+  );
+}
+
+function NewEntriesList({ series }: { series: DailyGrowthSeries[] }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const daysWithAdds = useMemo(
+    () => series.filter((d) => d.newDomains > 0).slice().reverse(),
+    [series],
+  );
+  if (daysWithAdds.length === 0) return null;
+  const anyMissingList = daysWithAdds.some((d) => !d.listAvailable && d.newDomains > 0);
+
+  function toggle(date: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
+  }
+
+  return (
+    <div className="border-t border-slate-100">
+      <div className="px-4 pt-3 pb-1.5 flex items-center justify-between">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">New Entries</p>
+        <span className="text-[10px] text-slate-400 tabular-nums">{daysWithAdds.length} {daysWithAdds.length === 1 ? "day" : "days"} with additions</span>
+      </div>
+      {anyMissingList && (
+        <p className="px-4 pb-2 text-[10.5px] text-amber-700 bg-amber-50/70 border-y border-amber-100 mb-1 pt-2">
+          Per-domain tracking started after the first baseline sync. Counts are accurate, but individual entries from earlier days aren&apos;t listed.
+        </p>
+      )}
+      <ul className="divide-y divide-slate-100">
+        {daysWithAdds.map((d) => {
+          const isOpen = expanded.has(d.date);
+          const items = d.newDomainsList.length > 0 ? d.newDomainsList : d.newRowsList;
+          const preview = items.slice(0, 3).join(", ");
+          const extra = items.length > 3 ? items.length - 3 : 0;
+          return (
+            <li key={d.date}>
+              <button
+                onClick={() => toggle(d.date)}
+                className="w-full text-left px-4 py-2.5 flex items-start gap-3 hover:bg-slate-50 transition-colors"
+              >
+                <div className="shrink-0 w-12 text-center">
+                  <p className="text-[9.5px] font-bold uppercase tracking-wider text-slate-400 leading-none">{new Date(`${d.date}T00:00:00`).toLocaleDateString("en-US", { month: "short" })}</p>
+                  <p className="text-[14px] font-bold tabular-nums text-slate-900 leading-tight mt-0.5">{new Date(`${d.date}T00:00:00`).getDate()}</p>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-semibold text-slate-900">
+                    <span className="text-[#6800FF]">+{d.newDomains}</span> new {d.newDomains === 1 ? "domain" : "domains"}
+                    {d.newRows !== d.newDomains && <span className="text-slate-500 font-normal"> · {d.newRows} {d.newRows === 1 ? "row" : "rows"}</span>}
+                    {!d.listAvailable && d.newDomains > 0 && (
+                      <span className="ml-2 text-[9.5px] font-normal text-amber-600">names not tracked</span>
+                    )}
+                  </p>
+                  {items.length > 0 && (
+                    <p className="text-[10.5px] text-slate-500 mt-0.5 truncate font-mono">
+                      {preview}
+                      {extra > 0 && <span className="text-slate-400 not-italic"> · +{extra} more</span>}
+                    </p>
+                  )}
+                </div>
+                {items.length > 0 && (
+                  <ChevronDown size={13} className={`shrink-0 mt-1 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                )}
+              </button>
+              {isOpen && items.length > 0 && (
+                <div className="px-4 pb-3 pl-[4.25rem]">
+                  <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5">
+                    {items.map((item) => (
+                      <li key={item} className="text-[11.5px] font-mono text-slate-700 truncate flex items-center gap-1.5">
+                        <span className="w-1 h-1 rounded-full bg-[#6800FF]/60 shrink-0" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function GrowthStat({ label, value, accent }: { label: string; value: number; accent?: "violet" | "emerald" }) {
+  const accentCls = accent === "violet" ? "text-[#6800FF]" : accent === "emerald" ? "text-emerald-700" : "text-slate-900";
+  return (
+    <div className="bg-slate-50 rounded-lg px-3 py-2 border border-slate-100">
+      <p className="text-[9.5px] font-bold uppercase tracking-wider text-slate-500 leading-none">{label}</p>
+      <p className={`text-[18px] font-bold tabular-nums leading-tight mt-1 ${accentCls}`}>
+        {value > 0 && <span className="text-[12px] mr-0.5">+</span>}
+        {value.toLocaleString()}
+      </p>
+    </div>
   );
 }
 
@@ -1519,7 +1575,7 @@ function LeadConnectSheetModal({ actor, projectId, current, onClose, onConnected
             <span className="w-8 h-8 rounded-md bg-[#f0e6ff] text-[#6800FF] flex items-center justify-center"><Link2 size={15} /></span>
             <div>
               <h2 className="text-[14px] font-bold text-slate-900">Connect Google Sheet</h2>
-              <p className="text-[11px] text-slate-500">Live sync — the Lead Accounts tab refreshes every time it&apos;s opened.</p>
+              <p className="text-[11px] text-slate-500">Live sync — the Accounts tab refreshes every time it&apos;s opened.</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"><X size={15} /></button>

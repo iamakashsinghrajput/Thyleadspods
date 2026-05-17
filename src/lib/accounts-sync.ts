@@ -1,6 +1,37 @@
 import AccountsSheet from "@/lib/models/accounts-sheet";
+import AccountsDailySnapshot from "@/lib/models/accounts-daily-snapshot";
 import { fetchTabRows } from "@/lib/google-sheets";
 import { normalizeDomain, rootKeyFor } from "@/lib/accounts-domain";
+
+function todayKey(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export async function recordDailySnapshot(
+  projectId: string,
+  totals: {
+    totalRows: number;
+    uniqueDomains: number;
+    allDomains: string[];
+    allRows: string[];
+  },
+): Promise<void> {
+  const date = todayKey();
+  await AccountsDailySnapshot.updateOne(
+    { projectId, date },
+    {
+      $set: {
+        totalRows: totals.totalRows,
+        uniqueDomains: totals.uniqueDomains,
+        allDomains: totals.allDomains,
+        allRows: totals.allRows,
+        recordedAt: new Date(),
+      },
+      $setOnInsert: { projectId, date },
+    },
+    { upsert: true },
+  );
+}
 
 const DOMAIN_NEEDLES = ["domain", "website", "url", "site"];
 const COMPANY_NEEDLES = ["company", "account", "organization", "organisation", "brand", "client"];
@@ -64,7 +95,9 @@ export async function syncFromGoogleSheet(args: {
     parsed.push({ domain, company, dnc: false, rootKey: rootKeyFor(domain) });
   }
 
-  const uniqueDomains = new Set(parsed.map((r) => r.rootKey)).size;
+  const uniqueDomainsList = Array.from(new Set(parsed.map((r) => r.rootKey)));
+  const uniqueDomains = uniqueDomainsList.length;
+  const allRowsList = parsed.map((p) => p.domain);
 
   const existing = await AccountsSheet.findOne({ projectId: args.projectId }).select("_id googleSheet.connectedAt googleSheet.sheetUrl").lean<{ _id: unknown; googleSheet?: { connectedAt?: Date | null; sheetUrl?: string } }>();
 
@@ -100,6 +133,13 @@ export async function syncFromGoogleSheet(args: {
       ...$set,
     });
   }
+
+  await recordDailySnapshot(args.projectId, {
+    totalRows: parsed.length,
+    uniqueDomains,
+    allDomains: uniqueDomainsList,
+    allRows: allRowsList,
+  });
 
   return {
     uploaded: parsed.length,

@@ -7,6 +7,7 @@ import AccountsSheet from "@/lib/models/accounts-sheet";
 import { SUPERADMIN_EMAIL } from "@/lib/user-approval";
 import { normalizeDomain, rootKeyFor } from "@/lib/accounts-domain";
 import { migrateLegacyGlobalSheet } from "@/lib/accounts-migrate";
+import { recordDailySnapshot } from "@/lib/accounts-sync";
 
 export const maxDuration = 120;
 
@@ -108,9 +109,12 @@ export async function POST(req: NextRequest) {
     parsed.push({ domain, company, dnc: false, rootKey: rootKeyFor(domain) });
   }
 
-  const uniqueDomains = new Set(parsed.map((r) => r.rootKey)).size;
+  const uniqueDomainsList = Array.from(new Set(parsed.map((r) => r.rootKey)));
+  const uniqueDomains = uniqueDomainsList.length;
+  const allRowsList = parsed.map((p) => p.domain);
 
   await migrateLegacyGlobalSheet();
+
   await AccountsSheet.updateOne(
     { projectId },
     {
@@ -130,6 +134,13 @@ export async function POST(req: NextRequest) {
     },
     { upsert: true },
   );
+
+  await recordDailySnapshot(projectId, {
+    totalRows: parsed.length,
+    uniqueDomains,
+    allDomains: uniqueDomainsList,
+    allRows: allRowsList,
+  });
 
   return NextResponse.json({
     ok: true,
